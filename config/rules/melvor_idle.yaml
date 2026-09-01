@@ -1,0 +1,57 @@
+# Melvor Idle 专用规则
+game: Melvor Idle
+version: 1.3
+
+safety:
+  hard_constraints:
+    - id: hp_below_20
+      condition: hp / max_hp < 0.2
+      action: stop_combat
+      description: 角色HP低于20%时停止战斗
+      severity: critical
+    - id: food_below_10
+      condition: food_count < 10
+      action: emergency_fish
+      description: 食物存量低于10时紧急钓鱼
+      severity: critical
+  soft_constraints:
+    - id: bank_space_low
+      condition: bank_used / bank_max > 0.95
+      action: pause_gathering
+      description: 仓库空间不足时暂停采集
+      severity: warning
+
+resources:
+  keep_always:
+    - 宝石
+    - 稀有装备
+    - 任务物品
+    - 宠物
+  sell_when_excess:
+    - item: 普通木材
+      threshold: 500
+    - item: 铜矿石
+      threshold: 1000
+  sell_for_investment: true
+
+priorities:
+  short_term:
+    - 突破当前技能瓶颈
+    - 完成进行中的城镇任务
+  mid_term:
+    - 解锁下一区域
+    - 收集关键宠物
+  long_term:
+    - 100%完成度
+
+equipment:
+  synthesis_paths:
+    - name: 龙装备线
+      stages: [铜装备, 铁装备, 钢装备, 龙装备]
+      keep_intermediate: true
+
+schedule:
+  diagnosis_interval: 1h
+  decision_interval: 10min
+  emergency_check: 30s
+  patrol_interval: 1h

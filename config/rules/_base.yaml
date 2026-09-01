@@ -1,0 +1,51 @@
+# 通用挂机游戏 Agent 基础规则框架
+# 所有游戏共享的默认配置，可被具体游戏规则覆盖
+
+game: _base
+version: 0.1.0
+
+# ========== 安全约束系统 ==========
+safety:
+  hard_constraints:
+    - id: low_health
+      condition: hp / max_hp < 0.2
+      action: stop_combat
+      description: 生命值低于20%时立即停止战斗
+      severity: critical
+    - id: death_detected
+      condition: death_popup_visible
+      action: pause_all
+      description: 角色死亡弹窗出现，立即暂停所有操作
+      severity: critical
+  soft_constraints:
+    - id: resource_cap
+      condition: bank_used / bank_max > 0.9
+      action: suggest_sell_excess
+      description: 仓库空间超过90%，建议出售低价值物品
+      severity: warning
+
+# ========== 资源管理规则 ==========
+resources:
+  keep_always:
+    - 宝石
+    - 稀有装备
+    - 任务物品
+  sell_when_excess:
+    - item: 普通木材
+      threshold: 500
+  sell_for_investment: true
+
+# ========== 优先级规则 ==========
+priorities:
+  short_term:
+    - 突破当前技能瓶颈
+  mid_term:
+    - 解锁下一区域
+  long_term:
+    - 100%完成度
+
+# ========== 调度配置 ==========
+schedule:
+  diagnosis_interval: 1h
+  decision_interval: 10min
+  emergency_check: 30s
