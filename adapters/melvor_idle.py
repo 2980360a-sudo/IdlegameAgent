@@ -1,74 +1,323 @@
-# IdleAgent v0.2.0 - adapters/melvor_idle.py
-# Generated: 2026-09-01
-
-# adapters/melvor_idle.py — Melvor Idle 专用适配器
-import asyncio
-import json
-import os
+"""
+Melvor Idle 适配器 - v0.2.1
+游戏网址: https://melvoridle.com
+实现方式: 优先注入 JS 读取 window.game 对象，失败时回退到 DOM 解析
+"""
 import re
-import datetime
-from typing 
-import List, Dict, Any, Optional
-from playwright.async_api 
-import Page
-from core.adapter 
-import GameAdapter
-from core.state 
-import GameState, GameEvent, Action, DOMMap, SkillInfo
-from core.browser 
-import BrowserManager, log, parse_save_time
-from core.safety 
-import dismiss_post_load_modals, safe_confirm, click_text_btn
-# 从环境变量读取账号（脱敏）
-MELVOR_ACCOUNT = os.environ.get('MELVOR_ACCOUNT', '')
-MELVOR_PASSWORD = os.environ.get('MELVOR_PASSWORD', '')
+import asyncio
+from typing import List, Dict, Any, Optional
+from playwright.async_api import Page, Locator
 
-class MelvorIdleAdapter(GameAdapter):    '''Melvor Idle 游戏适配器。    封装了 melvor.py 中所有 Melvor 专用逻辑：    - 状态抓取（JS 全局对象深度探测）    - 城镇维护自动化    - 药剂修正守卫    - 战斗安全检查    - 农务管理    '''    
+from core.adapter import GameAdapter
+from core.state import GameState, GameEvent, Action, DOMMap, EventType, ActionType
 
-def __init__(self, config: Dict[str, Any]):        super().__init__(config)        self.browser = BrowserManager(            game_url='https://melvoridle.com/index_game.php',            account=MELVOR_ACCOUNT,            password=MELVOR_PASSWORD,        )    
-# ========== GameAdapter 接口实现 ==========    async 
 
-def read_state(self, page: Page) -> GameState:        '''从 Melvor Idle 页面提取统一状态。'''        state = GameState(game_name='Melvor Idle', captured_at=datetime.datetime.now())        body = await page.inner_text('body')        
-# 金币        m = re.search(r'(d+(?:.d+)?)s*(百万|亿)s*n仓库', body)        if m:            
-# 简化处理，实际需要更精确的解析            state.gold = 0        
-# 仓库        m = re.search(r'仓库s*?n?s*(d+)s*/s*(d+)', body)        if m:            state.bank_used, state.bank_max = int(m.group(1)), int(m.group(2))        
-# 屠杀币        m = re.search(r'屠杀者s*?n?s*([d,]+)', body)        if m:            state.slayer_coins = int(m.group(1).replace(',', ''))        
-# JS 全局探测        probe = await page.evaluate('() => ({ hasGame: (typeof game !== ''undefined'') })')        if probe.get('hasGame'):            js_dump = await page.evaluate(self._DUMP_STATE_JS)            state.raw_probe = js_dump            
-# 解析技能            if 'skills' in js_dump:                for sid, info in js_dump['skills'].items():                    state.skills[sid] = SkillInfo(                        name=sid, level=info.get('lv', 0), xp=info.get('xp', 0)                    )            
-# 解析战斗状态            if 'combat' in js_dump:                c = js_dump['combat']                state.combat_active = c.get('isActive', False)                state.hp = c.get('hp')            
-# 当前动作            state.active_action = js_dump.get('activeAction')            
-# 星象            if 'astro' in js_dump:                state.skills['astrology'] = SkillInfo(                    name='astrology',                    level=js_dump['astro'].get('lv', 0),                    xp=js_dump['astro'].get('xp', 0),                )            
-# 药剂            state.active_potions = js_dump.get('potions', [])            
-# 城镇            state.township = {'level': js_dump.get('township', {}).get('lv')}        return state    async 
+class MelvorIdleAdapter(GameAdapter):
+    """Melvor Idle 专用适配器"""
 
-def execute_action(self, page: Page, action: Action) -> bool:        '''执行 Melvor 专用操作。'''        if action.action_type == 'navigate':            return await self.browser.nav_to([action.target])        elif action.action_type == 'click':            result = await click_text_btn(page, [action.target])            return result is not None        elif action.action_type == 'js':            
-# 执行自定义 JS            await page.evaluate(action.target, action.params.get('arg'))            return True        elif action.action_type == 'wait':            await page.wait_for_timeout(action.params.get('ms', 2000))            return True        return False    
+    # ============================================================
+    # 1. DOM 映射（用于 UI 解析的兜底方案）
+    # ============================================================
+    async def map_dom(self, raw_html: str) -> DOMMap:
+        """
+        将游戏原始 DOM 映射为统一选择器（暂未深度使用，保留接口）
+        """
+        return DOMMap(
+            resources={
+                "gold": "#resource-gold .amount",
+                "wood": "#resource-wood .amount",
+                "stone": "#resource-stone .amount",
+            },
+            combat={
+                "hp_bar": "#combat-hp-bar",
+                "hp_text": "#combat-hp-text",
+            }
+        )
 
-def map_dom(self, raw_html: str) -> DOMMap:        '''Melvor Idle DOM 映射。'''        return DOMMap(            game_name='Melvor Idle',            selectors={                'skill_label': '.nav-link .nav-main-link-name',                'bank_slot': '.bank-item',                'combat_hp': '#combat-player-hitpoints',                'force_save_btn': 'button:has-text(''Force Save''), button:has-text(''强制保存'')',                'modal_confirm': 'button.swal2-confirm',                'modal_cancel': 'button.swal2-cancel',            }        )    async 
+    # ============================================================
+    # 2. 核心：读取游戏状态（read_state）
+    # ============================================================
+    async def read_state(self, page: Page) -> GameState:
+        """
+        从 Melvor Idle 页面提取完整状态
+        策略：优先使用 window.game API (最精确)，失败时解析 DOM
+        """
+        # 等待页面核心元素加载完成（至少等待 3 秒，确保 React 渲染）
+        try:
+            await page.wait_for_selector("#app", timeout=10000)
+        except:
+            # 如果找不到 #app，可能页面未完全加载，尝试等待 body
+            await page.wait_for_selector("body", timeout=5000)
 
-def watch_events(self, page: Page) -> List[GameEvent]:        '''监听 Melvor 游戏事件。'''        events = []        body = await page.inner_text('body')        
-# 检测弹窗        modal = await page.locator('.swal2-popup:visible').count()        if modal > 0:            events.append(GameEvent(                event_type='modal', severity='warning',                details={'body': body[:200]}            ))        
-# 检测死亡        if '你死了' in body or 'You died' in body:            events.append(GameEvent(                event_type='death', severity='critical',                details={'message': '角色死亡 detected'}            ))        
-# 检测战斗状态        combat_active = await page.evaluate('() => game.combat ? game.combat.isActive : false')        if combat_active:            hp = await page.evaluate('() => game.combat.player ? game.combat.player.hitpoints : 0')            max_hp = await page.evaluate('() => game.combat.player ? game.combat.player.maxHitpoints : 1')            if hp / max_hp < 0.2:                events.append(GameEvent(                    event_type='low_hp', severity='critical',                    details={'hp': hp, 'max_hp': max_hp}                ))        return events    
-# ========== 游戏专用诊断扩展 ==========    async 
+        # ---- 方案 A：JS 注入读取 window.game（最优） ----
+        try:
+            data = await page.evaluate("""() => {
+                // 检查游戏全局对象是否存在
+                if (typeof window.game === 'undefined' && typeof window.__GAME__ === 'undefined') {
+                    return { error: 'GAME_NOT_FOUND' };
+                }
+                const game = window.game || window.__GAME__ || {};
 
-def diagnose_custom(self, state: GameState) -> Dict[str, Any]:        '''Melvor 专用诊断。'''        result = {'warnings': [], 'recommendations': []}        
-# 药剂检查        potions = state.active_potions        astro_ok = any('Astrology=melvorF:Secret_Stardust_Potion_III' in str(p) for p in potions)        if not astro_ok and state.active_action == 'Astrology':            result['warnings'].append('星象III级药剂缺失')            result['recommendations'].append('activate_astro_potion')        
-# 动作空转检查        if state.active_action is None:            result['warnings'].append('动作空转')            result['recommendations'].append('resume_study')        return result    
-# ========== 守卫操作 ==========    async 
+                // 1. 提取资源（资源名可能是动态的，这里取常见的前几个）
+                const resources = {};
+                if (game.resources) {
+                    for (const key of ['gold', 'wood', 'stone', 'iron', 'steel', 'fish', 'food']) {
+                        if (game.resources[key] !== undefined) {
+                            resources[key] = game.resources[key];
+                        }
+                    }
+                }
 
-def guards(self, page: Page) -> Dict[str, Any]:        '''巡检守卫：①动作空转→恢复研究 ②星象药剂≠III级→修正。'''        out = {}        act = await page.evaluate(self._READ_ACTION_POTIONS_JS)        out['before'] = act        action = act['action']        astro_potion_ok = any(            p.startswith('melvorD:Astrology=melvorF:Secret_Stardust_Potion_III')            for p in act['potions']        )        if action not in (None, 'Astrology'):            out['note'] = f'当前动作={action}，非星象，不干预'            log(f'[Melvor守卫] {out[''note'']}')            return out        if not astro_potion_ok:            log('[Melvor守卫] 星象III级药剂缺失，执行修正')            await self._fix_potion(page, '秘密星尘药水 III', out)        else:            out['potion_ok'] = True        if action is None:            log('[Melvor守卫] 动作空转，恢复研究海密尔')            await self._resume_study(page, '海密尔', out)        return out    async 
+                // 2. 提取战斗状态
+                let combat = { hp: 0, max_hp: 0, in_combat: false };
+                if (game.combat) {
+                    combat.hp = game.combat.hp || 0;
+                    combat.max_hp = game.combat.max_hp || 0;
+                    combat.in_combat = game.combat.in_combat || false;
+                }
 
-def _fix_potion(self, page: Page, potion_name: str, out: Dict):        '''修正药剂激活。'''        await self.browser.nav_to(['Astrology', '星象学'])        await page.wait_for_timeout(3000)        btn = page.locator('#page-header-potions-dropdown')        if await btn.count():            await btn.first.click()            await page.wait_for_timeout(2500)        out['potion_click'] = await page.evaluate(self._POTION_ACTIVATE_JS, potion_name)        await page.wait_for_timeout(2000)        await page.keyboard.press('Escape')        await page.wait_for_timeout(1000)        after = await page.evaluate(self._READ_ACTION_POTIONS_JS)        out['potion_after'] = after['potions']        out['potion_ok'] = any(            p.startswith('melvorD:Astrology=melvorF:Secret_Stardust_Potion_III')            for p in after['potions']        )        log(f'[Melvor守卫] 药剂修正 {out[''potion_click'']} -> ok={out[''potion_ok'']}')    async 
+                // 3. 提取技能等级（可选）
+                const skills = {};
+                if (game.skills) {
+                    for (const key of ['attack', 'strength', 'defence', 'fishing', 'woodcutting', 'mining']) {
+                        if (game.skills[key] !== undefined) {
+                            skills[key] = game.skills[key];
+                        }
+                    }
+                }
 
-def _resume_study(self, page: Page, constellation: str, out: Dict):        '''恢复星象研究。'''        await self.browser.nav_to(['Astrology', '星象学'])        await page.wait_for_timeout(3000)        cur = await page.evaluate('() => game.activeAction ? game.activeAction.constructor.name : null')        if cur != 'Astrology':            out['study_click'] = await page.evaluate(self._STUDY_CLICK_JS, constellation)            await page.wait_for_timeout(2500)        out['study_after'] = await page.evaluate(            '() => game.activeAction ? game.activeAction.constructor.name : null')        log(f'[Melvor守卫] 恢复研究 {out.get(''study_click'', ''already'')} -> {out[''study_after'']}')    
-# ========== 城镇维护 ==========    async 
+                return { resources, combat, skills };
+            }""")
 
-def township_repair_all(self, page: Page) -> Dict[str, Any]:        '''城镇一键修复：维修全部 + 建造链。'''        out = {}        await self.browser.nav_to(['Township', '城镇'])        await page.wait_for_timeout(3500)        
-# 维修全部        t = await click_text_btn(page, ['维修全部', 'Repair All'])        log(f'[城镇] 点击维修全部: {t}')        await page.wait_for_timeout(2000)        await safe_confirm(page)        await page.wait_for_timeout(2500)        
-# 建造链（简化版，实际需要更复杂的逻辑）        return out    
-# ========== JS 代码片段 ==========    _
-DUMP_STATE_JS = r'''() => {  const g = (fn, d=null) => { try { const v = fn(); return v === undefined ? d : v; } catch(e) { return d; } };  const out = {};  out.gp = g(() => game.gp.amount);  out.slayerCoins = g(() => game.currencies.registeredObjects.get('melvorD:SlayerCoins').amount);  out.skills = {};  g(() => {    for (const [id, s] of game.skills.registeredObjects)      out.skills[id.replace(/^melvorw*:/, '')] =        { lv: s.level, xp: Math.floor(s.xp) };  });  out.bank = {    occupiedSlots: g(() => game.bank.occupiedSlots),    maximumSlots: g(() => game.bank.maximumSlots),  };  out.activeAction = g(() => game.activeAction ? game.activeAction.constructor.name : null);  out.astro = {    lv: g(() => game.astrology.level),    xp: g(() => Math.floor(game.astrology.xp)),    studying: g(() => game.astrology.studiedConstellation ? game.astrology.studiedConstellation.id : null),  };  out.potions = g(() => {    const o = [];    for (const [k, v] of game.potions.activePotions)      o.push({ action: k && k.id ? k.id : String(k), item: v && v.item ? v.item.id : null, charges: v && v.charges !== undefined ? v.charges : null });    return o;  }, []);  out.combat = {    isActive: g(() => game.combat.isActive),    hp: g(() => game.combat.player ? game.combat.player.hitpoints : null),  };  out.township = { lv: g(() => game.township.level) };  out.lastCloudUpdate = g(() => game._lastCloudUpdate);  out.characterName = g(() => game.characterName);  return out;}'''    _
-STUDY_CLICK_JS = r'''(name) => {  const els = [...document.querySelectorAll(''*'')].filter(e => e.offsetParent !== null &&    (e.innerText || '').trim() === name);  els.sort((a, b) => a.innerHTML.length - b.innerHTML.length);  for (const el of els) {    let cur = el;    for (let i = 0; i < 8 && cur; i++) {      const btn = [...cur.querySelectorAll('button')].find(b => (b.innerText || '').trim() === '研究' && !b.disabled);      if (btn) { btn.click(); return 'clicked'; }      cur = cur.parentElement;    }  }  return 'nobtn';}'''    _
-POTION_ACTIVATE_JS = r'''(name) => {  const els = [...document.querySelectorAll(''*'')].filter(e => e.offsetParent !== null &&    (e.innerText || '').trim() === name);  els.sort((a, b) => a.innerHTML.length - b.innerHTML.length);  for (const el of els) {    let cur = el;    for (let i = 0; i < 8 && cur; i++) {      const btn = [...cur.querySelectorAll('button')].find(b => /^(选择|Select)$/.test((b.innerText || '').trim()) && !b.disabled);      if (btn) { btn.click(); return 'clicked'; }      cur = cur.parentElement;    }  }  return 'nobtn';}'''    _
-READ_ACTION_POTIONS_JS = r'''() => {  const o = { action: game.activeAction ? game.activeAction.constructor.name : null, potions: [] };  for (const [k, v] of game.potions.activePotions)    o.potions.push(k.id + '=' + (v.item ? v.item.id : '?') + ':' + v.charges);  return o;}'''
+            if data and "error" not in data:
+                # 成功从 window.game 读取
+                return GameState(
+                    resources=data.get("resources", {}),
+                    combat=data.get("combat", {"hp": 0, "max_hp": 0, "in_combat": False}),
+                    skills=data.get("skills", {}),
+                    timestamp=await self._get_timestamp(page)
+                )
+
+            print("[Adapter] window.game 不可用，降级到 DOM 解析")
+
+        except Exception as e:
+            print(f"[Adapter] JS 注入失败: {e}，降级到 DOM 解析")
+
+        # ---- 方案 B：DOM 解析（兜底方案） ----
+        return await self._read_state_from_dom(page)
+
+    # ============================================================
+    # 3. DOM 解析兜底实现
+    # ============================================================
+    async def _read_state_from_dom(self, page: Page) -> GameState:
+        """通过 DOM 元素解析状态（较慢但兼容性好）"""
+        resources = {}
+        combat = {"hp": 0, "max_hp": 0, "in_combat": False}
+
+        # 3.1 尝试抓取资源数值（根据常见的 Melvor 类名）
+        resource_selectors = {
+            "gold": ["#resource-gold .amount", ".resource-gold .amount", "[data-resource='gold']"],
+            "wood": ["#resource-wood .amount", ".resource-wood .amount", "[data-resource='wood']"],
+            "stone": ["#resource-stone .amount", ".resource-stone .amount", "[data-resource='stone']"],
+        }
+
+        for key, selectors in resource_selectors.items():
+            for sel in selectors:
+                try:
+                    el = await page.query_selector(sel)
+                    if el:
+                        text = await el.text_content()
+                        if text:
+                            # 移除千位分隔符等，只取数字
+                            cleaned = re.sub(r"[^\d.]", "", text.strip())
+                            if cleaned:
+                                resources[key] = float(cleaned)
+                                break
+                except:
+                    continue
+
+        # 3.2 抓取 HP（战斗状态）
+        hp_selectors = ["#combat-hp-text", ".hp-text", ".health-text"]
+        for sel in hp_selectors:
+            try:
+                el = await page.query_selector(sel)
+                if el:
+                    text = await el.text_content()
+                    if text:
+                        # 匹配 "850 / 1000" 格式
+                        match = re.search(r"(\d+)\s*/\s*(\d+)", text)
+                        if match:
+                            combat["hp"] = float(match.group(1))
+                            combat["max_hp"] = float(match.group(2))
+                            break
+                        # 也可能是单独的数值
+                        nums = re.findall(r"\d+", text)
+                        if len(nums) >= 2:
+                            combat["hp"] = float(nums[0])
+                            combat["max_hp"] = float(nums[1])
+                            break
+            except:
+                continue
+
+        # 3.3 检测是否在战斗中（通过查找战斗按钮或状态文字）
+        try:
+            combat_indicators = [".combat-active", ".in-combat", "button:has-text('战斗')"]
+            for sel in combat_indicators:
+                if await page.query_selector(sel):
+                    combat["in_combat"] = True
+                    break
+        except:
+            pass
+
+        return GameState(
+            resources=resources,
+            combat=combat,
+            skills={},
+            timestamp=await self._get_timestamp(page)
+        )
+
+    # ============================================================
+    # 4. 执行动作（execute_action）
+    # ============================================================
+    async def execute_action(self, page: Page, action: Action) -> bool:
+        """
+        执行原子操作：click / navigate / select / wait / scroll
+        """
+        try:
+            if action.type == ActionType.CLICK:
+                # 支持 CSS 选择器或文本定位
+                target = action.target
+                if target.startswith("#") or target.startswith(".") or target.startswith("["):
+                    # CSS 选择器
+                    locator = page.locator(target)
+                    if await locator.count() > 0:
+                        await locator.first.click()
+                        return True
+                else:
+                    # 按文本查找（模糊匹配）
+                    locator = page.get_by_text(target, exact=False)
+                    if await locator.count() > 0:
+                        await locator.first.click()
+                        return True
+                return False
+
+            elif action.type == ActionType.NAVIGATE:
+                await page.goto(action.target, timeout=15000)
+                await page.wait_for_load_state("networkidle")
+                return True
+
+            elif action.type == ActionType.SELECT:
+                # 下拉选择
+                locator = page.locator(action.target)
+                await locator.select_option(action.value or "")
+                return True
+
+            elif action.type == ActionType.WAIT:
+                await asyncio.sleep(action.duration or 1.0)
+                return True
+
+            elif action.type == ActionType.SCROLL:
+                await page.evaluate(f"window.scrollTo(0, {action.target})")
+                return True
+
+            else:
+                print(f"[Adapter] 未知动作类型: {action.type}")
+                return False
+
+        except Exception as e:
+            print(f"[Adapter] 执行动作失败: {e}")
+            return False
+
+    # ============================================================
+    # 5. 事件监听（watch_events）
+    # ============================================================
+    async def watch_events(self, page: Page) -> List[GameEvent]:
+        """
+        监听需要即时响应的事件：死亡弹窗、低HP警告、升级通知等
+        """
+        events = []
+
+        # 5.1 检查死亡弹窗（Melvor 常见的死亡模态框）
+        death_selectors = [
+            ".death-modal",
+            ".death-screen",
+            "div:has-text('You have died')",
+            "button:has-text('Respawn')",
+        ]
+        for sel in death_selectors:
+            try:
+                if await page.locator(sel).count() > 0:
+                    events.append(GameEvent(
+                        type=EventType.DEATH,
+                        message="角色已死亡！",
+                        data={"selector": sel}
+                    ))
+                    break
+            except:
+                pass
+
+        # 5.2 检查低血量警告（HP < 30%）
+        try:
+            # 尝试从 DOM 读取当前 HP（复用 read_state 的部分逻辑）
+            status = await self.read_state(page)
+            if status.combat and status.combat.get("hp", 0) > 0:
+                max_hp = status.combat.get("max_hp", 1)
+                hp_ratio = status.combat.get("hp", 0) / max_hp
+                if hp_ratio < 0.3:
+                    events.append(GameEvent(
+                        type=EventType.LOW_HP,
+                        message=f"血量过低: {hp_ratio:.0%}",
+                        data={"hp": status.combat.get("hp"), "max_hp": max_hp}
+                    ))
+        except:
+            pass
+
+        # 5.3 检测弹窗（通用）
+        try:
+            if await page.locator(".modal:visible, .popup:visible").count() > 0:
+                events.append(GameEvent(
+                    type=EventType.POPUP,
+                    message="检测到弹窗",
+                    data={}
+                ))
+        except:
+            pass
+
+        return events
+
+    # ============================================================
+    # 6. 辅助工具
+    # ============================================================
+    async def _get_timestamp(self, page: Page) -> float:
+        """获取当前时间戳（秒）"""
+        try:
+            return await page.evaluate("Date.now() / 1000")
+        except:
+            import time
+            return time.time()
+
+
+# ============================================================
+# 7. 测试入口（方便独立调试）
+# ============================================================
+if __name__ == "__main__":
+    import asyncio
+    from playwright.async_api import async_playwright
+
+    async def test_adapter():
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=False)
+            page = await browser.new_page()
+            await page.goto("https://melvoridle.com")
+
+            # 等待用户手动登录（因为 Melvor 需要登录，这里给 15 秒手动操作）
+            print("请手动登录 Melvor Idle... 15 秒后自动读取状态")
+            await asyncio.sleep(15)
+
+            adapter = MelvorIdleAdapter()
+            state = await adapter.read_state(page)
+            print("读取到的状态:", state)
+
+            await browser.close()
+
+    asyncio.run(test_adapter())
