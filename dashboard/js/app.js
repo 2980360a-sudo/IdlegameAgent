@@ -1,6 +1,6 @@
 /**
- * IdleAgent — Web 控制台主脚本（修复语法错误版）
- * 所有函数均已测试，无语法错误
+ * IdleAgent — Web 控制台主脚本（最终修正版）
+ * 所有功能正常：REST API + WebSocket（兼容纯文本 pong）
  */
 
 console.log('[IdleAgent] 脚本开始加载...');
@@ -48,7 +48,7 @@ console.log('[IdleAgent] DOM 元素检查:', {
 });
 
 // ============================================================
-// 3. API 调用（使用传统函数避免箭头语法问题）
+// 3. API 调用（传统函数，稳定）
 // ============================================================
 var API = {
     getStatus: function() {
@@ -79,7 +79,7 @@ var API = {
 };
 
 // ============================================================
-// 4. 渲染函数（安全更新 DOM）
+// 4. 渲染函数
 // ============================================================
 function renderStatus(status) {
     if (!status) return;
@@ -135,7 +135,7 @@ function renderRules() {
 }
 
 // ============================================================
-// 5. WebSocket
+// 5. WebSocket（修正版，兼容纯文本 pong）
 // ============================================================
 function initWebSocket() {
     if (AppState.ws) {
@@ -162,18 +162,25 @@ function initWebSocket() {
 
     AppState.ws.onmessage = function(event) {
         try {
-            var data = JSON.parse(event.data);
-            if (data.type === 'state_update') {
-                renderStatus(data.payload);
-            } else if (data.type === 'log') {
-                AppState.logs.push(data.payload);
-                if (AppState.logs.length > 500) AppState.logs = AppState.logs.slice(-500);
-                if (AppState.currentPage === 'logs' || AppState.currentPage === 'dashboard') {
-                    renderLogs(AppState.logs);
+            var trimmed = event.data.trim();
+            // 判断是否为 JSON（以 { [ " 开头）
+            if (trimmed.startsWith('{') || trimmed.startsWith('[') || trimmed.startsWith('"')) {
+                var data = JSON.parse(trimmed);
+                if (data.type === 'state_update') {
+                    renderStatus(data.payload);
+                } else if (data.type === 'log') {
+                    AppState.logs.push(data.payload);
+                    if (AppState.logs.length > 500) AppState.logs = AppState.logs.slice(-500);
+                    if (AppState.currentPage === 'logs' || AppState.currentPage === 'dashboard') {
+                        renderLogs(AppState.logs);
+                    }
                 }
+            } else {
+                // 纯文本（如 "pong"）忽略或打印
+                console.log('[WS] 收到文本:', trimmed);
             }
         } catch (e) {
-            console.warn('[WS] 解析失败:', e);
+            console.warn('[WS] 解析失败:', e, '原始数据:', event.data);
         }
     };
 
