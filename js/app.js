@@ -1,6 +1,5 @@
 /**
- * IdleAgent — Web 控制台主脚本（最终修正版）
- * 所有功能正常：REST API + WebSocket（兼容纯文本 pong）
+ * IdleAgent — Web 控制台主脚本 (适配动态内容版)
  */
 
 console.log('[IdleAgent] 脚本开始加载...');
@@ -18,37 +17,64 @@ var AppState = {
 };
 
 // ============================================================
-// 2. DOM 引用（安全获取）
+// 2. DOM 引用（初始为空，渲染后更新）
 // ============================================================
-var DOM = {
-    gold: document.getElementById('gold-value'),
-    wood: document.getElementById('wood-value'),
-    stone: document.getElementById('stone-value'),
-    hp: document.getElementById('hp-value'),
-    maxHp: document.getElementById('max-hp-value'),
-    statusIndicator: document.getElementById('agent-status'),
-    startBtn: document.getElementById('btn-start'),
-    stopBtn: document.getElementById('btn-stop'),
-    pauseBtn: document.getElementById('btn-pause'),
-    logBody: document.getElementById('log-table-body'),
-    rulesContent: document.getElementById('rules-content')
-};
-
-console.log('[IdleAgent] DOM 元素检查:', {
-    gold: !!DOM.gold,
-    wood: !!DOM.wood,
-    stone: !!DOM.stone,
-    hp: !!DOM.hp,
-    maxHp: !!DOM.maxHp,
-    statusIndicator: !!DOM.statusIndicator,
-    startBtn: !!DOM.startBtn,
-    stopBtn: !!DOM.stopBtn,
-    pauseBtn: !!DOM.pauseBtn,
-    logBody: !!DOM.logBody
-});
+var DOM = {};
 
 // ============================================================
-// 3. API 调用（传统函数，稳定）
+// 3. 渲染仪表盘内容
+// ============================================================
+function renderDashboard() {
+    var contentArea = document.getElementById('contentArea');
+    if (!contentArea) return;
+    contentArea.innerHTML = `
+        <div class="dashboard-stats">
+            <div class="stat-card">
+                <div class="stat-label">💰 金币</div>
+                <div class="stat-value" id="gold-value">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">🪵 木头</div>
+                <div class="stat-value" id="wood-value">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">🪨 石头</div>
+                <div class="stat-value" id="stone-value">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">❤️ 生命值</div>
+                <div class="stat-value" id="hp-value">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">❤️ 最大生命</div>
+                <div class="stat-value" id="max-hp-value">0</div>
+            </div>
+        </div>
+        <div class="logs-section">
+            <h3>决策日志</h3>
+            <table>
+                <thead><tr><th>时间</th><th>级别</th><th>模块</th><th>消息</th></tr></thead>
+                <tbody id="log-table-body"></tbody>
+            </table>
+        </div>
+    `;
+    // 更新 DOM 引用
+    DOM.gold = document.getElementById('gold-value');
+    DOM.wood = document.getElementById('wood-value');
+    DOM.stone = document.getElementById('stone-value');
+    DOM.hp = document.getElementById('hp-value');
+    DOM.maxHp = document.getElementById('max-hp-value');
+    DOM.logBody = document.getElementById('log-table-body');
+    DOM.statusIndicator = document.querySelector('.agent-status .status-dot');
+    DOM.startBtn = document.getElementById('startBtn');   // 如果有这些按钮，需在 HTML 中添加对应 id
+    DOM.stopBtn = document.getElementById('stopBtn');
+    DOM.pauseBtn = document.getElementById('pauseBtn');
+    DOM.rulesContent = document.getElementById('rules-content'); // 可能在其他页面
+    console.log('[IdleAgent] 仪表盘渲染完成，DOM 已更新');
+}
+
+// ============================================================
+// 4. API 调用
 // ============================================================
 var API = {
     getStatus: function() {
@@ -79,7 +105,7 @@ var API = {
 };
 
 // ============================================================
-// 4. 渲染函数
+// 5. 渲染函数（安全更新 DOM）
 // ============================================================
 function renderStatus(status) {
     if (!status) return;
@@ -97,8 +123,10 @@ function renderStatus(status) {
     var running = status.is_running === true;
     AppState.isRunning = running;
     if (DOM.statusIndicator) {
-        DOM.statusIndicator.className = running ? 'status-on' : 'status-off';
-        DOM.statusIndicator.textContent = running ? '● 运行中' : '● 已停止';
+        DOM.statusIndicator.className = 'status-dot ' + (running ? 'running' : 'stopped');
+        // 同时更新侧边栏文本（可选）
+        var statusSpan = document.querySelector('.agent-status span');
+        if (statusSpan) statusSpan.textContent = running ? 'Agent运行中' : 'Agent已停止';
     }
 }
 
@@ -124,18 +152,8 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-function renderRules() {
-    if (!DOM.rulesContent) return;
-    API.getRules().then(function(data) {
-        var text = data.rules ? JSON.stringify(data.rules, null, 2) : '（无规则配置）';
-        DOM.rulesContent.textContent = text;
-    }).catch(function(err) {
-        DOM.rulesContent.textContent = '加载规则失败: ' + err.message;
-    });
-}
-
 // ============================================================
-// 5. WebSocket（修正版，兼容纯文本 pong）
+// 6. WebSocket（同前，略）
 // ============================================================
 function initWebSocket() {
     if (AppState.ws) {
@@ -163,7 +181,6 @@ function initWebSocket() {
     AppState.ws.onmessage = function(event) {
         try {
             var trimmed = event.data.trim();
-            // 判断是否为 JSON（以 { [ " 开头）
             if (trimmed.startsWith('{') || trimmed.startsWith('[') || trimmed.startsWith('"')) {
                 var data = JSON.parse(trimmed);
                 if (data.type === 'state_update') {
@@ -176,7 +193,6 @@ function initWebSocket() {
                     }
                 }
             } else {
-                // 纯文本（如 "pong"）忽略或打印
                 console.log('[WS] 收到文本:', trimmed);
             }
         } catch (e) {
@@ -196,15 +212,18 @@ function initWebSocket() {
 }
 
 // ============================================================
-// 6. 控制按钮绑定
+// 7. 控制按钮（需在 HTML 中添加 id）
 // ============================================================
 function setupControls() {
-    function showMessage(msg) {
-        alert(msg);
-    }
+    function showMessage(msg) { alert(msg); }
 
-    if (DOM.startBtn) {
-        DOM.startBtn.addEventListener('click', function() {
+    // 检查是否有这些按钮（需在 HTML 中添加 id）
+    var startBtn = document.getElementById('startBtn');
+    var stopBtn = document.getElementById('stopBtn');
+    var pauseBtn = document.getElementById('pauseBtn');
+
+    if (startBtn) {
+        startBtn.addEventListener('click', function() {
             API.control('start').then(function(result) {
                 showMessage(result.message || 'Agent 已启动');
                 return API.getStatus();
@@ -216,8 +235,8 @@ function setupControls() {
         });
     }
 
-    if (DOM.stopBtn) {
-        DOM.stopBtn.addEventListener('click', function() {
+    if (stopBtn) {
+        stopBtn.addEventListener('click', function() {
             API.control('stop').then(function(result) {
                 showMessage(result.message || 'Agent 已停止');
                 return API.getStatus();
@@ -229,8 +248,8 @@ function setupControls() {
         });
     }
 
-    if (DOM.pauseBtn) {
-        DOM.pauseBtn.addEventListener('click', function() {
+    if (pauseBtn) {
+        pauseBtn.addEventListener('click', function() {
             API.control('pause').then(function(result) {
                 showMessage(result.message || 'Agent 已暂停');
                 return API.getStatus();
@@ -241,27 +260,88 @@ function setupControls() {
             });
         });
     }
+
+    // 刷新按钮
+    var refreshBtn = document.getElementById('refreshBtn');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', function() {
+            API.getStatus().then(function(status) {
+                renderStatus(status);
+            }).catch(function(err) {
+                console.error('刷新失败:', err);
+            });
+        });
+    }
 }
 
 // ============================================================
-// 7. 页面导航
+// 8. 页面导航（适配你的侧边栏）
 // ============================================================
 function navigateTo(page) {
     AppState.currentPage = page;
-    var pages = ['dashboard', 'rules', 'logs', 'analytics', 'settings'];
-    for (var i = 0; i < pages.length; i++) {
-        var el = document.getElementById('page-' + pages[i]);
-        if (el) el.style.display = (pages[i] === page) ? 'block' : 'none';
+    // 更新导航高亮
+    var navItems = document.querySelectorAll('.nav-item');
+    navItems.forEach(function(item) {
+        item.classList.remove('active');
+        if (item.getAttribute('data-page') === page) {
+            item.classList.add('active');
+        }
+    });
+    // 页面标题更新
+    var titleMap = {
+        'dashboard': '仪表盘',
+        'games': '游戏管理',
+        'rules': '规则配置',
+        'logs': '决策日志',
+        'analytics': '数据分析',
+        'settings': '系统设置'
+    };
+    var pageTitle = document.querySelector('.page-title');
+    var pageSubtitle = document.querySelector('.page-subtitle');
+    if (pageTitle) pageTitle.textContent = titleMap[page] || page;
+    if (pageSubtitle) {
+        var subMap = {
+            'dashboard': '实时监控所有游戏Agent的运行状态',
+            'games': '管理已添加的游戏和适配器',
+            'rules': '查看和编辑YAML规则配置',
+            'logs': '查看Agent的决策日志和历史记录',
+            'analytics': '数据分析和图表展示',
+            'settings': '系统设置和账号管理'
+        };
+        pageSubtitle.textContent = subMap[page] || '';
     }
-    if (page === 'rules') renderRules();
-    else if (page === 'logs') renderLogs(AppState.logs);
-    else if (page === 'dashboard' && AppState.currentStatus) renderStatus(AppState.currentStatus);
+
+    // 根据页面渲染内容（目前只有仪表盘实现）
+    if (page === 'dashboard') {
+        renderDashboard();
+        // 重新加载数据
+        API.getStatus().then(function(status) {
+            renderStatus(status);
+        }).catch(function(err) {
+            console.error('加载状态失败:', err);
+        });
+        API.getLogs(100).then(function(logData) {
+            AppState.logs = logData.logs || [];
+            renderLogs(AppState.logs);
+        }).catch(function(err) {
+            console.error('加载日志失败:', err);
+        });
+    } else {
+        // 其他页面暂时显示占位信息
+        var contentArea = document.getElementById('contentArea');
+        if (contentArea) {
+            contentArea.innerHTML = '<div class="placeholder"><h2>' + (titleMap[page] || page) + '</h2><p>该页面正在开发中...</p></div>';
+        }
+    }
 }
 
 // ============================================================
-// 8. 数据加载
+// 9. 数据加载（初始调用）
 // ============================================================
 function loadInitialData() {
+    // 先渲染仪表盘
+    renderDashboard();
+    // 加载数据
     Promise.all([
         API.getStatus(),
         API.getLogs(100)
@@ -280,7 +360,7 @@ function loadInitialData() {
 }
 
 // ============================================================
-// 9. 初始化
+// 10. 初始化
 // ============================================================
 function initApp() {
     console.log('[IdleAgent] 开始初始化...');
@@ -289,26 +369,33 @@ function initApp() {
     setupControls();
 
     // 导航菜单绑定
-    var navLinks = document.querySelectorAll('[data-page]');
-    for (var i = 0; i < navLinks.length; i++) {
-        (function(link) {
-            link.addEventListener('click', function(e) {
-                e.preventDefault();
-                var page = link.getAttribute('data-page');
-                if (page) navigateTo(page);
-            });
-        })(navLinks[i]);
+    var navLinks = document.querySelectorAll('.nav-item[data-page]');
+    navLinks.forEach(function(link) {
+        link.addEventListener('click', function(e) {
+            e.preventDefault();
+            var page = link.getAttribute('data-page');
+            if (page) navigateTo(page);
+        });
+    });
+
+    // 模态框逻辑（简单示例）
+    var addGameBtn = document.getElementById('addGameBtn');
+    var modal = document.getElementById('addGameModal');
+    var closeModal = function() {
+        if (modal) modal.style.display = 'none';
+    };
+    if (addGameBtn && modal) {
+        addGameBtn.addEventListener('click', function() {
+            modal.style.display = 'block';
+        });
+        modal.querySelector('.modal-close').addEventListener('click', closeModal);
+        modal.querySelector('.modal-backdrop').addEventListener('click', closeModal);
+        document.getElementById('cancelAddGame').addEventListener('click', closeModal);
+        document.getElementById('confirmAddGame').addEventListener('click', function() {
+            alert('游戏添加功能开发中');
+            closeModal();
+        });
     }
-
-    navigateTo('dashboard');
-
-    // 备用轮询
-    setInterval(function() {
-        if (AppState.ws && AppState.ws.readyState === WebSocket.OPEN) return;
-        API.getStatus().then(function(status) {
-            renderStatus(status);
-        }).catch(function(e) { /* 忽略 */ });
-    }, 15000);
 
     console.log('[IdleAgent] 初始化完成');
 }
