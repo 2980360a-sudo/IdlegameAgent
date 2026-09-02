@@ -1,4 +1,4 @@
-﻿# IdleAgent v0.6.0 - core/melvor_agent.py
+# IdleAgent v0.6.0 - core/melvor_agent.py
 # Melvor 挂机 Agent 会话管理：账号存储 + 三种运行模式 + 事件/决策追踪
 
 import os
@@ -200,6 +200,8 @@ class MelvorAgentSession:
 
     # ---------- 登录 / 角色 ----------
     async def login(self, account: str, password: str) -> Dict[str, Any]:
+        if self.session_state == 'running':
+            return {'ok': False, 'error': 'Agent 运行中，请先「停止」再登录（避免存档冲突）'}
         self._log_event('login', 'info', {'account': account})
         if self.mock:
             self.session_state = 'connected'
@@ -225,6 +227,8 @@ class MelvorAgentSession:
             return []
 
     async def select_character(self, index: int) -> Dict[str, Any]:
+        if self.session_state == 'running':
+            return {'ok': False, 'error': 'Agent 运行中，请先「停止」再选择角色（避免存档冲突）'}
         if self.mock:
             self.character_index = index
             self.character_label = self._mock_characters[index]['label'] if index < len(self._mock_characters) else ''

@@ -378,6 +378,7 @@
     function renderMelvor() {
         clearMelvorPoll();
         $('#contentArea').innerHTML = '' +
+            '<div id="mv-running-warning" class="mv-warning hidden">⚠️ Agent 挂机中：浏览器为无头模式，<b>请勿在其它浏览器登录同一账号手动操作</b>，避免存档冲突覆盖。如需手动玩，请先点「■ 停止」。</div>' +
             '<div class="melvor-grid">' +
             '  <div class="melvor-left">' +
             '    <div class="panel"><div class="panel-header"><span class="panel-title">① 连接云账号</span><span class="panel-hint" id="mv-session"></span></div>' +
@@ -475,6 +476,8 @@
         API.melvorStatus().then(function (s) {
             $('#mv-session').textContent = sessionText(s.session_state);
             $('#mv-mode-label').textContent = (s.mode_label || '') + (s.character_label ? ' · ' + s.character_label : '');
+            var warn = $('#mv-running-warning');
+            if (warn) warn.classList.toggle('hidden', s.session_state !== 'running');
             renderMelvorData(s.game);
         }).catch(function () {});
         API.melvorEvents().then(function (d) { renderMelvorLogs('#mv-events', d.events || [], 'event'); }).catch(function () {});
