@@ -1,5 +1,5 @@
-# IdleAgent v0.2.0 - core/scheduler.py
-# Generated: 2026-09-01
+﻿# IdleAgent v0.4.0 - core/scheduler.py
+# Agent 调度器：诊断 / 决策 / 执行 / 紧急检查的定时任务
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -7,7 +7,7 @@ from typing import Callable
 
 
 class AgentScheduler:
-    """Agent调度器：管理诊断、决策、执行、紧急检查的定时任务。"""
+    """Agent 调度器。"""
 
     def __init__(self, diagnosis_interval_min: int = 60,
                  decision_interval_min: int = 10,

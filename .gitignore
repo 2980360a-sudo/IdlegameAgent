@@ -78,5 +78,6 @@ config.local.yaml
 
 # State / runtime data
 state/*.json
+state/*.db
 logs/*.log
 shots/*.png

@@ -1,4 +1,4 @@
-# IdleAgent v0.3.0 - core/browser.py
+﻿# IdleAgent v0.4.0 - core/browser.py
 # 通用浏览器自动化封装
 
 import asyncio
@@ -64,9 +64,7 @@ def parse_save_time(text: str) -> Optional[datetime.datetime]:
 
 
 class BrowserManager:
-    """通用浏览器管理器：负责启动、登录、存档加载、页面生命周期。
-    游戏专用逻辑通过回调或子类扩展。
-    """
+    """通用浏览器管理器：负责启动、登录、存档加载、页面生命周期。"""
 
     def __init__(
         self,
@@ -89,6 +87,7 @@ class BrowserManager:
         self.height = height or BROWSER_HEIGHT
         self.ctx = None
         self.page = None
+        self.pw = None
 
     async def launch(self):
         """启动浏览器并创建页面。"""
@@ -128,27 +127,28 @@ class BrowserManager:
     async def close(self):
         """关闭浏览器。"""
         if self.ctx:
-            await self.ctx.close()
-        if hasattr(self, 'pw') and self.pw:
-            await self.pw.stop()
+            try:
+                await self.ctx.close()
+            except Exception:
+                pass
+        if self.pw:
+            try:
+                await self.pw.stop()
+            except Exception:
+                pass
         log('浏览器已关闭')
 
-    # ---------- 启动序列（通用框架，游戏专用逻辑通过回调扩展） ----------
+    # ---------- 启动序列 ----------
 
     async def boot_sequence(self, char_select_timeout: int = 200000, ready_timeout: int = 200000):
-        """完整的启动序列：启动 -> 角色选择 -> 加载存档 -> 游戏就绪。
-        游戏专用逻辑（如语言选择、登录方式）由子类或回调覆盖。
-        """
+        """完整的启动序列：启动 -> 角色选择 -> 加载存档 -> 游戏就绪。"""
         await self._boot_to_char_select(timeout_ms=char_select_timeout)
         await self._load_newest_save()
         await self._wait_game_ready(timeout_ms=ready_timeout)
         log('游戏启动序列完成')
 
     async def _boot_to_char_select(self, timeout_ms: int = 200000):
-        """驱动启动序列直到角色选择页。
-        通用实现：检测启动阶段、处理语言选择、登录。
-        游戏可覆盖：do_login, find_login_entry 等方法。
-        """
+        """驱动启动序列直到角色选择页。"""
         stages = [
             '正在获取账户信息', '正在获取云存档', '正在初始化模组管理器',
             'Confirming Expansions', '正在载入游戏数据', 'Fetching', 'Loading'
@@ -168,13 +168,11 @@ class BrowserManager:
                     log('到达角色选择页（已登录）')
                     return
 
-                # 语言选择
                 if 'Select Language' in body:
                     log('选择语言: 简体中文')
                     await self._select_language('简体中文')
                     continue
 
-                # 英文页面 -> 切回中文
                 if not lang_switched and (
                     ('Save Slot' in body and '存档栏位' not in body) or 'DEMO VERSION' in body
                 ):
@@ -182,7 +180,6 @@ class BrowserManager:
                     lang_switched = True
                     continue
 
-                # 未登录 -> 登录
                 if demo and not login_done:
                     entry = await self._find_login_entry()
                     if entry:
@@ -195,7 +192,6 @@ class BrowserManager:
                     else:
                         log('试玩版页面但未找到登录入口，等待…')
 
-                # 记录启动阶段
                 for s in stages:
                     if s in body and s not in seen:
                         seen.add(s)
@@ -208,7 +204,7 @@ class BrowserManager:
             await self.page.wait_for_timeout(2500)
 
     async def _select_language(self, lang: str):
-        """选择语言。游戏可覆盖。"""
+        """选择语言。"""
         zh = self.page.locator(f'text={lang}').first
         try:
             await zh.click(timeout=8000)
@@ -239,7 +235,7 @@ class BrowserManager:
             await self.page.wait_for_timeout(3000)
 
     async def _find_login_entry(self):
-        """查找登录入口。游戏可覆盖。"""
+        """查找登录入口。"""
         for css in [
             'text=云账:visible',
             'text=Sign in to your Cloud Account:visible',
@@ -252,13 +248,12 @@ class BrowserManager:
         return None
 
     async def _do_login(self):
-        """执行登录。游戏可覆盖表单结构。"""
+        """执行登录。"""
         log('填写云账号登录表单…')
         pwd = self.page.locator("input[type='password']:visible").first
         await pwd.wait_for(state='visible', timeout=60000)
         user_box = self.page.locator("input[type='text']:visible, input[type='email']:visible").first
 
-        # 防重渲染：填入后读回校验
         for attempt in range(3):
             await user_box.fill(self.account)
             await pwd.fill(self.password)
@@ -273,7 +268,6 @@ class BrowserManager:
             log(f'表单值未保留，等待重渲染后重填（第{attempt + 1}次）')
             await self.page.wait_for_timeout(2000)
 
-        # 点击登录按钮
         submitted = False
         for label in ['Sign In', 'Sign in', 'Log In', 'Login', '登入', '登录', '登陆']:
             for css in [
@@ -304,10 +298,7 @@ class BrowserManager:
         await self.page.wait_for_timeout(6000)
 
     async def _load_newest_save(self):
-        """加载最新存档。
-        通用逻辑：本地为空->云下载；本地比云新->本地上传。
-        游戏可覆盖存档槽定位逻辑。
-        """
+        """加载最新存档。"""
         deadline = asyncio.get_event_loop().time() + 60
         body = ''
         while asyncio.get_event_loop().time() < deadline:
@@ -391,7 +382,7 @@ class BrowserManager:
         await self._confirm_if_modal()
 
     async def _find_slot_loc(self, timeout_s: int = 75):
-        """等待并返回带时间戳的存档槽可点元素。游戏可覆盖。"""
+        """等待并返回带时间戳的存档槽可点元素。"""
         deadline = asyncio.get_event_loop().time() + timeout_s
         while asyncio.get_event_loop().time() < deadline:
             for css in ['text=最后保存:visible', 'text=Last Save:visible']:
@@ -425,9 +416,7 @@ class BrowserManager:
         return False
 
     async def _wait_game_ready(self, timeout_ms: int = 200000):
-        """等待游戏主界面就绪。
-        通用判定：侧边栏出现特定关键词。游戏可覆盖判定条件。
-        """
+        """等待游戏主界面就绪。"""
         deadline = asyncio.get_event_loop().time() + timeout_ms / 1000
         seen = set()
         while asyncio.get_event_loop().time() < deadline:
@@ -445,7 +434,6 @@ class BrowserManager:
         else:
             raise TimeoutError('等待游戏主界面超时')
 
-        # 等离线结算弹窗出现，分三轮关闭
         from .safety import dismiss_post_load_modals
         for wait_s in [8, 6, 6]:
             await self.page.wait_for_timeout(wait_s * 1000)
@@ -476,7 +464,6 @@ class BrowserManager:
                     except Exception:
                         pass
 
-            # 检查顶栏上次云保存时间
             body = await self.page.inner_text('body')
             m = re.search(r'Last Cloud Save\s*\n?\s*(\d+)h (\d+)m (\d+)s', body)
             if m:

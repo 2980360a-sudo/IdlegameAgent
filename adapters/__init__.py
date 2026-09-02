@@ -1,5 +1,5 @@
-# IdleAgent v0.2.0 - adapters/__init__.py
-# Generated: 2026-09-01
+﻿# IdleAgent v0.4.0 - adapters/__init__.py
 
-from .melvor_idle 
-import MelvorIdleAdapter
+from .melvor_idle import MelvorIdleAdapter
+
+__all__ = ['MelvorIdleAdapter']

@@ -1,30 +1,52 @@
-# IdleAgent v0.2.0 - core/state.py
-# Generated: 2026-09-01
+﻿# IdleAgent v0.4.0 - core/state.py
+# 统一数据模型：所有引擎与适配器共享的 Pydantic 结构
 
+from enum import Enum
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 from datetime import datetime
 
 
+class ActionType(str, Enum):
+    """原子操作类型（与适配器 execute_action 解耦的契约）。"""
+    CLICK = 'click'
+    NAVIGATE = 'navigate'
+    SELECT = 'select'
+    WAIT = 'wait'
+    SCROLL = 'scroll'
+    INPUT = 'input'
+
+
+class EventType(str, Enum):
+    """游戏事件类型。"""
+    DEATH = 'death'
+    LOW_HP = 'low_hp'
+    LEVEL_UP = 'level_up'
+    POPUP = 'popup'
+    COMPLETION = 'completion'
+    ERROR = 'error'
+    INFO = 'info'
+
+
 class SkillInfo(BaseModel):
     name: str
     level: int
-    xp: int
+    xp: int = 0
     mastery_level: Optional[int] = None
     mastery_pool: Optional[int] = None
 
 
 class ResourceInfo(BaseModel):
     name: str
-    quantity: int
-    threshold: Optional[int] = None
+    quantity: float = 0
+    threshold: Optional[float] = None
     is_locked: bool = False
 
 
 class EquipmentInfo(BaseModel):
     slot: str
     name: str
-    tier: str
+    tier: str = ''
 
 
 class GameEvent(BaseModel):
@@ -61,6 +83,7 @@ class GameState(BaseModel):
     combat_active: bool = False
     hp: Optional[int] = None
     max_hp: Optional[int] = None
+    death_popup_visible: bool = False
     township: Optional[Dict[str, Any]] = None
     farming: Optional[Dict[str, Any]] = None
     active_potions: List[Dict[str, Any]] = Field(default_factory=list)

@@ -1,8 +1,8 @@
-# IdleAgent v0.3.0 🎮🤖
+# IdleAgent v0.4.0 🎮🤖
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/Version-0.3.0-green.svg)]()
+[![Version](https://img.shields.io/badge/Version-0.4.0-green.svg)]()
 [![Status](https://img.shields.io/badge/Status-Beta-orange.svg)]()
 
 一个基于 LLM 的通用挂机游戏（Idle/Incremental Games）自动化决策 Agent 框架。支持多游戏接入、可配置决策规则、可审计决策日志与持续策略学习。
@@ -13,14 +13,15 @@
 
 ## 版本信息
 
-- **当前版本**: v0.3.0
-- **发布日期**: 2026-09-02
-- **更新内容**: 修复核心语法问题、API 服务可用、WebSocket 实时推送、前端控制台联调通过
+- **当前版本**: v0.4.0
+- **发布日期**: 2026-09-03
+- **更新内容**: 完成真实适配器接入引擎、LLM 决策、SQLite 持久化三大核心能力；修复适配器与数据模型不一致、`/health` 路由被静态挂载遮蔽、`adapters/__init__.py` 与 `scripts/melvor.py` 换行损坏等问题
 
 ### 版本历史
 
 | 版本 | 日期 | 更新内容 |
 |------|------|---------|
+| v0.4.0 | 2026-09-03 | 完成「真实适配器接入引擎」「LLM 决策（DeepSeek）」「SQLite 持久化」；修复适配器/数据模型不一致、`/health` 被静态挂载遮蔽、损坏的 `__init__.py` 与 `melvor.py`；新增 `core/llm.py`、`core/storage.py`、`tests/test_smoke.py` |
 | v0.3.0 | 2026-09-02 | 修复 `browser.py`/`main.py` 换行问题；API 服务可用；WebSocket 心跳正常；前端联调通过 |
 | v0.2.0 | 2026-09-01 | 通用框架重构、MelvorIdleAdapter、脱敏、Web 控制台、YAML 规则配置、FastAPI 后端骨架 |
 | v0.1.0 | 2026-08 | Melvor Idle 单游戏脚本原型（72h 零人工干预验证） |
@@ -43,6 +44,9 @@
 │  │         📐 通用规则系统（YAML 配置）                  │  │
 │  │  资源卖留规则 · 优先级规则 · 合成路径 · 安全约束      │  │
 │  └──────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │         💾 SQLite 持久化（日志 + 状态快照 + 审计）     │  │
+│  └──────────────────────────────────────────────────────┘  │
 ├─────────────────────────────────────────────────────────────┤
 │              🔌 游戏适配层（Game Adapter）                  │
 │  状态抓取器  │  操作执行器  │  DOM映射  │  事件监听        │
@@ -59,15 +63,16 @@
 ## 功能特性
 
 - ✅ **通用化架构** — 诊断/规划/决策/审计四层引擎，与具体游戏解耦
-- ✅ **YAML 规则配置** — 无需改代码，通过配置文件调整决策策略
-- ✅ **LLM 辅助决策** — 支持 DeepSeek、GPT-4 等模型进行复杂判断（接口预留）
+- ✅ **YAML 规则配置** — 无需改代码，通过配置文件调整决策策略（含安全约束条件求值）
+- ✅ **LLM 辅助决策** — 已接入 DeepSeek（OpenAI 兼容接口），规则无法覆盖时由 LLM 生成操作序列
 - ✅ **可审计决策日志** — 每次操作均可回溯其依据与上下文
 - ✅ **Web 管理控制台** — 实时监控、规则编辑、日志查看、数据分析
 - ✅ **FastAPI 后端服务** — REST API + WebSocket 实时推送
 - ✅ **安全约束系统** — 硬约束（如角色死亡即暂停）与软约束分级管理
 - ✅ **弹窗安全协议** — 危险词/交易词/损失警告黑名单，绝不误操作
+- ✅ **SQLite 持久化** — 决策日志、状态快照、决策审计入库，支持历史回溯
+- ✅ **真实适配器接入** — `MelvorIdleAdapter.read_state()` 驱动引擎，Web 控制台可切换真实/模拟数据
 - 🔄 **社区学习机制** — Agent 主动学习攻略并迭代自身策略（规划中）
-- 🔄 **SQLite 持久化** — 存储决策日志与状态快照（规划中）
 
 ---
 
@@ -94,6 +99,9 @@ cp .env.example .env
 # 编辑 .env，填入你的游戏账号和 LLM API Key
 ```
 
+关键变量：`MELVOR_ACCOUNT` / `MELVOR_PASSWORD`（游戏账号）、`LLM_API_KEY`（DeepSeek）、
+`USE_REAL_ADAPTER`（API 是否接入真实浏览器，默认 `false` 走模拟数据）。
+
 ### 4. 启动后端 API 服务
 
 ```bash
@@ -104,14 +112,20 @@ python -m uvicorn api.app:app --reload --host 0.0.0.0 --port 8000
 ### 5. 运行 Agent（命令行模式）
 
 ```bash
-# 自动模式（定时诊断+决策+执行）
+# 自动模式（定时诊断+决策+执行，需真实账号）
 python main.py --game melvor_idle --mode auto
 
 # 单次状态检查
 python main.py --game melvor_idle --mode inspect
 
 # 守卫模式（药剂修正+动作恢复）
-python scripts/patrol.py guards
+python main.py --game melvor_idle --mode guards
+```
+
+### 6. 运行冒烟测试（无需浏览器）
+
+```bash
+python tests/test_smoke.py
 ```
 
 ---
@@ -119,43 +133,47 @@ python scripts/patrol.py guards
 ## 目录结构
 
 ```
-IdleAgent/ v0.3.0
+IdleAgent/ v0.4.0
 ├── .env.example              # 环境变量模板（脱敏）
 ├── requirements.txt          # Python 依赖
-├── .gitignore               # Git 忽略规则
-├── LICENSE                  # MIT 许可证
-├── README.md                # 本文件
-├── main.py                  # 统一入口（支持 auto/inspect/guards/manual）
-├── api/                     # FastAPI 后端服务
-│   ├── app.py               # FastAPI 应用入口（REST + WebSocket）
-│   ├── dependencies.py      # AgentRuntime 依赖注入（模拟数据/真实数据切换）
-│   ├── managers.py          # WebSocket 连接管理器
-│   └── routes/              # API 路由
-│       ├── status.py        # GET /api/status — 游戏状态
-│       ├── control.py       # POST /api/control/{start|stop|pause} — 启停控制
-│       ├── logs.py          # GET /api/logs — 决策日志查询
-│       └── rules.py         # GET /api/rules — 规则配置读取
-├── core/                    # 通用引擎（与游戏解耦）
+├── .gitignore                # Git 忽略规则
+├── LICENSE                   # MIT 许可证
+├── README.md                 # 本文件
+├── main.py                   # 统一入口（支持 auto/inspect/guards/manual）
+├── api/                      # FastAPI 后端服务
+│   ├── app.py                # FastAPI 应用入口（REST + WebSocket）
+│   ├── dependencies.py       # AgentRuntime 依赖注入（模拟/真实数据切换 + SQLite）
+│   ├── managers.py           # WebSocket 连接管理器
+│   └── routes/               # API 路由
+│       ├── status.py         # GET /api/status — 游戏状态
+│       ├── control.py        # POST /api/control/{start|stop|pause} — 启停控制
+│       ├── logs.py           # GET /api/logs — 决策日志查询
+│       └── rules.py          # GET /api/rules — 规则配置读取
+├── core/                     # 通用引擎（与游戏解耦）
 │   ├── __init__.py
-│   ├── adapter.py           # GameAdapter 抽象基类（4个接口契约）
-│   ├── state.py             # Pydantic 数据模型（GameState/Action/GameEvent...）
-│   ├── browser.py           # Playwright 浏览器管理（启动/登录/存档/导航）
-│   ├── safety.py            # 弹窗安全系统（危险词/交易词/损失警告黑名单）
-│   ├── engine.py            # 四层引擎：诊断/规划/决策/执行
-│   └── scheduler.py         # APScheduler 定时任务调度
-├── adapters/                # 游戏适配器
+│   ├── adapter.py            # GameAdapter 抽象基类（4个接口契约 + YAML 规则加载）
+│   ├── state.py              # Pydantic 数据模型（GameState/Action/GameEvent/枚举...）
+│   ├── browser.py            # Playwright 浏览器管理（启动/登录/存档/导航）
+│   ├── safety.py             # 弹窗安全系统（危险词/交易词/损失警告黑名单）
+│   ├── engine.py             # 四层引擎：诊断/规划/决策/执行（含条件求值 + LLM 决策）
+│   ├── llm.py                # LLM 客户端（DeepSeek/OpenAI 兼容，httpx 实现）
+│   ├── storage.py            # SQLite 持久化（日志/状态快照/决策审计）
+│   └── scheduler.py          # APScheduler 定时任务调度
+├── adapters/                 # 游戏适配器
 │   ├── __init__.py
-│   └── melvor_idle.py       # Melvor Idle 专用适配器（JS注入+DOM解析双策略）
-├── scripts/                 # 可执行脚本
-│   ├── melvor.py            # 完整巡检脚本（脱敏）
-│   └── patrol.py            # 精简守卫脚本（脱敏）
-├── config/rules/            # 规则配置文件（YAML 热更新）
-│   ├── _base.yaml           # 通用基础规则（所有游戏共享）
-│   └── melvor_idle.yaml     # Melvor 专用规则（覆盖基础规则）
-└── dashboard/               # Web 管理控制台（前端）
-    ├── index.html           # 单页应用入口
-    ├── css/style.css        # 样式表
-    └── js/app.js            # 前端逻辑（API调用 + WebSocket + 页面渲染）
+│   └── melvor_idle.py        # Melvor Idle 专用适配器（JS注入+DOM解析双策略 + 守卫）
+├── scripts/                  # 可执行脚本
+│   ├── melvor.py             # 完整巡检脚本（脱敏）
+│   └── patrol.py             # 精简守卫脚本（脱敏）
+├── config/rules/             # 规则配置文件（YAML 热更新）
+│   ├── _base.yaml            # 通用基础规则（所有游戏共享）
+│   └── melvor_idle.yaml      # Melvor 专用规则（覆盖基础规则）
+├── tests/                    # 测试
+│   └── test_smoke.py         # 冒烟测试（引擎/规则/持久化，无需浏览器）
+└── dashboard/                # Web 管理控制台（前端）
+    ├── index.html            # 单页应用入口
+    ├── css/style.css         # 样式表
+    └── js/app.js             # 前端逻辑（API调用 + WebSocket + 页面渲染）
 ```
 
 ---
@@ -169,10 +187,10 @@ IdleAgent/ v0.3.0
 | 实时通信 | WebSocket | ✅ 心跳正常 |
 | 浏览器自动化 | Playwright | ✅ 可用 |
 | 数据模型 | Pydantic v2 | ✅ 可用 |
-| 规则引擎 | PyYAML | ✅ 可用 |
+| 规则引擎 | PyYAML | ✅ 可用（含条件求值） |
 | 调度系统 | APScheduler | ✅ 可用 |
-| 数据存储 | SQLite | 🔄 预留接口 |
-| LLM 调用 | DeepSeek API / OpenAI API | 🔄 接口预留 |
+| 数据存储 | SQLite | ✅ 已实现（日志 + 快照 + 审计） |
+| LLM 调用 | DeepSeek API（OpenAI 兼容） | ✅ 已实现（httpx） |
 
 ---
 
@@ -180,7 +198,7 @@ IdleAgent/ v0.3.0
 
 | 游戏 | 状态 | 完成度 |
 |------|------|--------|
-| [Melvor Idle](https://melvoridle.com) | v0.3.0 可用 | 适配器骨架完成，JS 注入 + DOM 解析双策略，守卫操作可用 |
+| [Melvor Idle](https://melvoridle.com) | v0.4.0 可用 | 适配器完整，JS 注入 + DOM 解析双策略，守卫操作、状态读取、动作执行已接入引擎 |
 | Clicker Heroes | 计划中 | 适配器模板待开发 |
 | NGU Idle | 计划中 | — |
 
@@ -195,11 +213,11 @@ IdleAgent/ v0.3.0
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/health` | 健康检查 |
-| GET | `/api/status` | 获取当前游戏状态（模拟数据） |
+| GET | `/api/status` | 获取当前游戏状态（模拟或真实数据，取决于 `USE_REAL_ADAPTER`） |
 | POST | `/api/control/start` | 启动 Agent |
 | POST | `/api/control/stop` | 停止 Agent |
 | POST | `/api/control/pause` | 暂停 Agent |
-| GET | `/api/logs?limit=50` | 获取决策日志 |
+| GET | `/api/logs?limit=50` | 获取决策日志（SQLite） |
 | GET | `/api/rules` | 获取规则配置 |
 | WS | `/ws` | WebSocket 实时推送（ping/pong 心跳） |
 
@@ -230,17 +248,25 @@ class MyGameAdapter(GameAdapter):
         pass
 ```
 
+可选钩子：`diagnose_custom(state)`（游戏专用诊断）、`guards(page)`（守卫）、`pre_boot` / `post_shutdown`。
+
 ### 修改决策逻辑
 
-优先编辑 `config/rules/melvor_idle.yaml` 中的规则，避免改动核心代码。
+优先编辑 `config/rules/melvor_idle.yaml` 中的规则（`safety.hard_constraints[].condition`
+支持形如 `hp / max_hp < 0.2` 的表达式），避免改动核心代码。
 
 ### 接入 LLM
 
-在 `core/engine.py` 的 `DecisionEngine._llm_decide()` 中：
+在 `.env` 中配置 `LLM_API_KEY` 即可启用 LLM 决策（`core/engine.py` 的 `DecisionEngine._llm_decide()`）：
 1. 构建 Prompt（包含状态、目标、历史）
-2. 调用 DeepSeek/OpenAI API
+2. 调用 DeepSeek/OpenAI 兼容接口（`core/llm.py`）
 3. 解析 JSON 返回，生成 Action 列表
-4. 记录审计日志
+4. 记录审计日志（`core/storage.py`）
+
+### 数据持久化
+
+`core/storage.py` 提供 SQLite 三层存储：`logs`（日志）、`state_snapshots`（状态快照）、
+`decisions`（决策审计）。默认库文件为 `state/idleagent.db`。
 
 ### 扩展 Web 控制台
 
@@ -251,18 +277,18 @@ class MyGameAdapter(GameAdapter):
 
 ## 已知问题
 
-- `core/browser.py` 和 `main.py` 曾出现换行符丢失问题（已修复），建议在仓库根目录添加 `.gitattributes` 统一换行符
 - Melvor Idle 的 DOM 结构可能随版本变化，需定期更新适配器中的选择器
 - WebSocket 收到的 "pong" 纯文本不会影响功能（已在前端做了兼容处理）
-- Windows 下 Git 换行符问题：建议 `git config --global core.autocrlf false`
+- Windows 下 Git 换行符问题：建议 `git config --global core.autocrlf false`，或添加 `.gitattributes` 统一换行符
+- 真实模式（`USE_REAL_ADAPTER=true` / `main.py --mode auto`）依赖已安装的 Chromium 与有效账号，未在 CI 中自动化联调
 
 ---
 
 ## 未来计划（优先级排序）
 
-1. 🔄 **集成真实适配器到引擎** — 用 `MelvorIdleAdapter.read_state()` 替换模拟数据，驱动决策
-2. 🔄 **实现 LLM 决策** — 完成 `_llm_decide()`，接入 DeepSeek API
-3. 🔄 **SQLite 存储** — 持久化日志和状态快照，支持历史回溯
+1. ✅ **集成真实适配器到引擎** — `MelvorIdleAdapter.read_state()` 驱动决策（已实现）
+2. ✅ **实现 LLM 决策** — 完成 `_llm_decide()`，接入 DeepSeek API（已实现）
+3. ✅ **SQLite 存储** — 持久化日志和状态快照，支持历史回溯（已实现）
 4. 🔄 **完善 Web 控制台** — 游戏管理、规则编辑、数据分析图表
 5. 🔄 **多游戏适配器** — 添加 Clicker Heroes、NGU Idle 等，验证通用性
 6. 🔄 **Docker 化部署** — 支持远程访问
@@ -285,7 +311,7 @@ class MyGameAdapter(GameAdapter):
 - 规则配置模板
 - 前端控制台功能增强（Chart.js 图表、实时数据连接）
 - LLM 决策 Prompt 优化
-- SQLite 持久化实现
+- 单元测试与集成测试
 - 文档和教程
 - Bug 修复和性能优化
 

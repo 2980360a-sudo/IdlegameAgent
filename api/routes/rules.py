@@ -4,13 +4,19 @@ import os
 
 router = APIRouter()
 
+
 @router.get("/rules")
 async def get_rules():
-    # 读取 config/rules/melvor_idle.yaml 并返回
-    rules_path = os.path.join("config", "rules", "melvor_idle.yaml")
-    try:
-        with open(rules_path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f)
-            return {"rules": data}
-    except FileNotFoundError:
-        return {"rules": {}, "error": "Rules file not found"}
+    base = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config", "rules")
+    result = {}
+    for fname in ("_base.yaml", "melvor_idle.yaml"):
+        path = os.path.join(base, fname)
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    result[fname] = yaml.safe_load(f)
+            except Exception as e:
+                result[fname] = {"error": str(e)}
+    if not result:
+        return {"rules": {}, "error": "Rules files not found"}
+    return {"rules": result}

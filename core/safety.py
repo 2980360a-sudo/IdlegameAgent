@@ -1,5 +1,5 @@
-# IdleAgent v0.2.0 - core/safety.py
-# Generated: 2026-09-01
+﻿# IdleAgent v0.4.0 - core/safety.py
+# 弹窗安全系统：危险词 / 交易词 / 损失警告黑名单
 
 import re
 from playwright.async_api import Page
@@ -24,6 +24,7 @@ LOSS_WORDS = [
 
 async def dismiss_post_load_modals(page: Page, max_rounds: int = 4):
     """进游戏后关闭欢迎回来/更新公告等安全弹窗。
+
     只点 好/关闭/知道了/OK 类按钮。危险词/交易词/损失警告绝不点。
     """
     for _ in range(max_rounds):
