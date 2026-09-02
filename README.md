@@ -109,9 +109,12 @@ cp .env.example .env
 ### 4. 启动后端 API 服务
 
 ```bash
-python -m uvicorn api.app:app --reload --host 0.0.0.0 --port 8000
+python -m uvicorn api.app:app --host 0.0.0.0 --port 8000
 # 访问 http://localhost:8000 即可看到控制台界面
 ```
+
+> ⚠️ **Windows 注意**：不要加 `--reload` 或 `--workers`，否则 uvicorn 会退回 `SelectorEventLoop`，
+> 该循环不支持启动浏览器子进程（Playwright 会报 `NotImplementedError`）。
 
 ### 5. 运行 Agent（命令行模式）
 

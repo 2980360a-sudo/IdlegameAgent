@@ -1,4 +1,4 @@
-﻿# IdleAgent v0.6.0 - core/browser.py
+# IdleAgent v0.6.0 - core/browser.py
 # 通用浏览器自动化封装
 
 import asyncio
@@ -91,6 +91,18 @@ class BrowserManager:
 
     async def launch(self):
         """启动浏览器并创建页面。"""
+        # Windows 上 ProactorEventLoop 才支持 spawn 子进程；uvicorn 用 --reload/--workers 时会退回 SelectorEventLoop
+        import sys as _sys
+        try:
+            _loop = asyncio.get_running_loop()
+        except RuntimeError:
+            _loop = None
+        if _sys.platform == 'win32' and _loop is not None and not isinstance(_loop, asyncio.ProactorEventLoop):
+            raise RuntimeError(
+                f'当前事件循环 {type(_loop).__name__} 不支持启动浏览器（Windows 需 ProactorEventLoop）。'
+                '请去掉 uvicorn 的 --reload / --workers 参数后重启：'
+                'python -m uvicorn api.app:app --host 0.0.0.0 --port 8000'
+            )
         os.makedirs(self.profile_dir, exist_ok=True)
         self.pw = await async_playwright().start()
         self.ctx = await self.pw.chromium.launch_persistent_context(

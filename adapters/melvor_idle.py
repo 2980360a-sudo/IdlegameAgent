@@ -1,10 +1,11 @@
-﻿"""
+"""
 Melvor Idle 适配器 - v0.6.0
 游戏网址: https://melvoridle.com
 实现方式: 优先注入 JS 读取 window.game 对象，失败时回退到 DOM 解析
 """
 import re
 import os
+import json
 import asyncio
 from typing import List, Dict, Any, Optional
 
@@ -59,19 +60,17 @@ class MelvorIdleAdapter(GameAdapter):
     # 2. 读取状态（JS 注入优先，DOM 解析兜底）
     # ------------------------------------------------------------
     async def read_state(self, page: Page) -> GameState:
-        try:
-            await page.wait_for_selector('#app, body', timeout=10000)
-        except Exception:
-            pass
+        """纯 JS 注入读取 window.game（先等待游戏就绪，不用 DOM 解析）。"""
+        await self._wait_game_ready(page)
 
-        # ---- 方案 A：JS 注入读取 window.game（最优） ----
         try:
             data = await page.evaluate("""() => {
                 const g = (fn, d = null) => {
-                    try { const v = fn(); return v === undefined ? d : v; } catch (e) { return d; }
+                    try {
+                        const v = fn();
+                        return (v === undefined || (typeof v === 'number' && isNaN(v))) ? d : v;
+                    } catch (e) { return d; }
                 };
-                if (typeof game === 'undefined') return { error: 'GAME_NOT_FOUND' };
-
                 const out = {};
                 out.gold = g(() => Math.floor(game.gp.amount));
                 out.slayerCoins = g(() => {
@@ -88,7 +87,23 @@ class MelvorIdleAdapter(GameAdapter):
                 out.combat = {
                     active: g(() => game.combat ? game.combat.isActive : false),
                     hp: g(() => (game.combat && game.combat.player) ? Math.floor(game.combat.player.hitpoints) : null),
-                    maxHp: g(() => (game.combat && game.combat.player) ? Math.floor(game.combat.player.maxHitpoints) : null),
+                    maxHp: g(() => {
+                        const p = game.combat && game.combat.player;
+                        if (!p) return null;
+                        // 最大生命在 player.stats 子对象（getter maxHitpoints / 私有 _maxHitpoints）
+                        const st = p.stats;
+                        if (st) {
+                            for (const k of ['maxHitpoints', '_maxHitpoints', 'maxHitPoints', 'maxHP']) {
+                                const v = st[k];
+                                if (typeof v === 'number' && isFinite(v)) return Math.floor(v);
+                            }
+                        }
+                        for (const k of ['maxHitpoints', 'maxHitPoints', 'hitpointsMax', 'maxHP', 'maxHealth']) {
+                            const v = p[k];
+                            if (typeof v === 'number' && isFinite(v)) return Math.floor(v);
+                        }
+                        return null;
+                    }),
                     food: g(() => {
                         const f = game.combat && game.combat.player && game.combat.player.food;
                         if (!f || !f.slots) return null;
@@ -101,7 +116,31 @@ class MelvorIdleAdapter(GameAdapter):
                         return t && t.monster ? { monster: t.monster.name, killsLeft: t.killsLeft } : null;
                     }),
                 };
-                out.combatLevel = g(() => game.combatLevel);
+                out.combatLevel = g(() => {
+                    const p = game.combat && game.combat.player;
+                    // 1) 直接字段候选
+                    const candidates = [
+                        game.combatLevel,
+                        p && p.combatLevel,
+                        p && p.stats && p.stats.combatLevel,
+                        p && p.stats && p.stats.character && p.stats.character.combatLevel,
+                        game.combat && game.combat.combatLevel,
+                    ];
+                    for (const v of candidates) {
+                        if (typeof v === 'number' && isFinite(v) && v > 0) return Math.floor(v);
+                    }
+                    // 2) 按 Melvor 战斗等级公式计算
+                    const lv = p && (p.levels || (p.stats && p.stats.character && p.stats.character.levels));
+                    if (lv) {
+                        const get = (k) => { const v = lv[k]; return typeof v === 'number' ? v : 0; };
+                        const atk = get('Attack'), str = get('Strength'), def = get('Defence'),
+                              hp = get('Hitpoints'), rng = get('Ranged'), mag = get('Magic'), pray = get('Prayer');
+                        const base = 0.25 * (def + hp + Math.floor(pray / 2));
+                        const best = Math.max(atk + str, Math.floor(rng * 1.5), Math.floor(mag * 2));
+                        return Math.floor(base + 0.325 * best);
+                    }
+                    return null;
+                });
                 out.activeAction = g(() => game.activeAction ? game.activeAction.constructor.name : null);
                 out.skills = {};
                 g(() => {
@@ -138,23 +177,85 @@ class MelvorIdleAdapter(GameAdapter):
                 };
                 out.township = {
                     level: g(() => game.township.level),
-                    health: g(() => game.township.health),
-                    happiness: g(() => game.township.happiness),
-                    population: g(() => game.township.citizens),
+                    health: g(() => game.township.townData ? game.township.townData.healthPercent : null),
+                    happiness: g(() => game.township.townData ? game.township.townData.happiness : null),
+                    population: g(() => game.township.townData ? game.township.townData.population : null),
                     storage: g(() => game.township.townData ? game.township.townData.buildingStorage : null),
                 };
+                out._debug = g(() => {
+                    const p = game.combat && game.combat.player;
+                    const st = p && p.stats;
+                    const ch = st && st.character;
+                    const sample = {};
+                    if (st) {
+                        for (const k of ['maxHitpoints', '_maxHitpoints', 'hitpoints', 'combatLevel', 'levels']) {
+                            if (st[k] !== undefined) sample[k] = st[k];
+                        }
+                    }
+                    const chSample = {};
+                    if (ch) {
+                        for (const k of ['combatLevel', 'levels', 'hitpoints', 'maxHitpoints']) {
+                            if (ch[k] !== undefined) chSample[k] = ch[k];
+                        }
+                    }
+                    const levelsSample = {};
+                    if (p && p.levels) {
+                        for (const k of ['Attack', 'Strength', 'Defence', 'Hitpoints', 'Ranged', 'Magic', 'Prayer', 'combatLevel', 'combat_level']) {
+                            if (p.levels[k] !== undefined) levelsSample[k] = p.levels[k];
+                        }
+                    }
+                    return {
+                        playerKeys: p ? Object.keys(p).slice(0, 60) : [],
+                        combatKeys: game.combat ? Object.keys(game.combat).slice(0, 50) : [],
+                        statsKeys: st ? Object.keys(st).slice(0, 60) : [],
+                        statsSample: sample,
+                        characterKeys: ch ? Object.keys(ch).slice(0, 40) : [],
+                        characterSample: chSample,
+                        levelsSample: levelsSample,
+                        gameCombatLevel: typeof game.combatLevel !== 'undefined' ? game.combatLevel : 'undefined',
+                    };
+                });
                 return out;
             }""")
 
-            if data and 'error' not in data:
-                return self._build_state(data)
-            log('[Adapter] window.game 不可用，降级到 DOM 解析')
+            log(f'[Adapter] JS 抓取: 金币={data.get("gold")}, 技能数={len(data.get("skills") or {})}, '
+                f'银行={data.get("bank")}, HP={data.get("combat", {}).get("hp")}, '
+                f'maxHp={data.get("combat", {}).get("maxHp")}, 战斗等级={data.get("combatLevel")}')
+            return self._build_state(data)
 
         except Exception as e:
-            log(f'[Adapter] JS 注入失败: {e}，降级到 DOM 解析')
+            log(f'[Adapter] JS 注入异常: {e}')
+            return GameState(game_name=self.name)
 
-        # ---- 方案 B：DOM 解析（兜底） ----
-        return await self._read_state_from_dom(page)
+    async def _wait_game_ready(self, page: Page, timeout_s: int = 90) -> bool:
+        """轮询直到 window.game 核心对象加载完成。"""
+        deadline = asyncio.get_event_loop().time() + timeout_s
+        while asyncio.get_event_loop().time() < deadline:
+            try:
+                ready = await page.evaluate(
+                    "() => typeof game !== 'undefined' && game.gp !== undefined "
+                    "&& game.bank !== undefined && game.skills !== undefined"
+                )
+                if ready:
+                    return True
+            except Exception:
+                pass
+            await asyncio.sleep(2)
+        log('[Adapter] 等待 window.game 就绪超时')
+        return False
+
+    @staticmethod
+    def _num(v):
+        """把 NaN / None / 非数字清洗为 None，其余转 int（防 Pydantic finite_number 校验失败）。"""
+        try:
+            if v is None or v == '':
+                return None
+            f = float(v)
+            if f != f:  # NaN
+                return None
+            return int(f)
+        except (TypeError, ValueError):
+            return None
 
     def _build_state(self, data: Dict[str, Any]) -> GameState:
         """把 JS 注入的原始字典转换为统一 GameState。"""
@@ -164,20 +265,20 @@ class MelvorIdleAdapter(GameAdapter):
             try:
                 skills[name] = SkillInfo(
                     name=name,
-                    level=int(s.get('level', 0)),
-                    xp=int(s.get('xp', 0)),
-                    mastery_level=s.get('mastery'),
-                    mastery_pool=s.get('masteryPool'),
+                    level=self._num(s.get('level')) or 0,
+                    xp=self._num(s.get('xp')) or 0,
+                    mastery_level=self._num(s.get('mastery')),
+                    mastery_pool=self._num(s.get('masteryPool')),
                 )
             except Exception:
                 continue
 
         resources: Dict[str, ResourceInfo] = {}
-        if data.get('gold') is not None:
-            resources['gold'] = ResourceInfo(name='gold', quantity=int(data['gold']))
-        if data.get('slayerCoins') is not None:
+        if self._num(data.get('gold')) is not None:
+            resources['gold'] = ResourceInfo(name='gold', quantity=self._num(data['gold']))
+        if self._num(data.get('slayerCoins')) is not None:
             resources['slayer_coins'] = ResourceInfo(
-                name='slayer_coins', quantity=int(data['slayerCoins'])
+                name='slayer_coins', quantity=self._num(data['slayerCoins'])
             )
 
         bank = data.get('bank') or {}
@@ -185,26 +286,26 @@ class MelvorIdleAdapter(GameAdapter):
 
         return GameState(
             game_name=self.name,
-            gold=data.get('gold'),
-            slayer_coins=data.get('slayerCoins'),
-            bank_used=bank.get('used'),
-            bank_max=bank.get('max'),
+            gold=self._num(data.get('gold')),
+            slayer_coins=self._num(data.get('slayerCoins')),
+            bank_used=self._num(bank.get('used')),
+            bank_max=self._num(bank.get('max')),
             skills=skills,
             resources=resources,
             active_action=data.get('activeAction'),
             combat_active=bool(combat.get('active')),
-            hp=combat.get('hp'),
-            max_hp=combat.get('maxHp'),
-            combat_level=data.get('combatLevel'),
+            hp=self._num(combat.get('hp')),
+            max_hp=self._num(combat.get('maxHp')),
+            combat_level=self._num(data.get('combatLevel')),
             food=combat.get('food'),
-            auto_eat_tier=combat.get('autoEatTier'),
+            auto_eat_tier=self._num(combat.get('autoEatTier')),
             slayer_task=combat.get('slayerTask'),
             active_potions=data.get('potions') or [],
             township=data.get('township'),
             farming=data.get('farming'),
             astrology=data.get('astrology'),
-            bank_item_count=bank.get('itemCount'),
-            bank_locked_count=bank.get('lockedCount'),
+            bank_item_count=self._num(bank.get('itemCount')),
+            bank_locked_count=self._num(bank.get('lockedCount')),
             raw_probe=data,
         )
 
@@ -515,54 +616,94 @@ class MelvorIdleAdapter(GameAdapter):
         return self.browser.page
 
     async def list_characters(self, page: Page) -> List[Dict[str, Any]]:
-        """枚举角色选择页的存档槽（角色）。"""
-        slots: List[Dict[str, Any]] = []
+        """枚举角色选择页的存档槽（角色）。等待存档槽时间戳加载，必要时显示云存档。"""
+        # 1. 等待存档槽带时间戳出现（云存档拉取可能较慢）；本地无存档时点「显示云存档」
+        deadline = asyncio.get_event_loop().time() + 90
+        while asyncio.get_event_loop().time() < deadline:
+            try:
+                body = await page.inner_text('body')
+                if re.search(r'(最后保存|Last Save)[^\n]{0,30}\d{4}/\d{1,2}/\d{1,2}', body) or \
+                   re.search(r'(最后保存|Last Save)[^\n]{0,30}\d{1,2}/\d{1,2}/\d{4}', body):
+                    break
+                # 本地无存档时，云存档需要手动点开
+                show = page.locator(
+                    "button:has-text('显示云存档'):visible, button:has-text('Show Cloud Saves'):visible"
+                )
+                if await show.count():
+                    await show.first.click(timeout=8000)
+                    await page.wait_for_timeout(3000)
+            except Exception:
+                pass
+            await asyncio.sleep(2)
+
+        # 2. 从 body 文本提取存档槽（「最后保存：时间戳」格式；标签与日期可能在不同元素，正则最稳）
         try:
-            slots = await page.evaluate("""() => {
-                const out = [];
-                const seen = new Set();
-                const els = [...document.querySelectorAll('*')].filter(e =>
-                    e.children.length === 0 && /最后保存|Last Save/i.test(e.innerText || ''));
-                els.forEach((el) => {
-                    const txt = (el.innerText || '').trim();
-                    if (seen.has(txt)) return;
-                    seen.add(txt);
-                    out.push({ label: txt });
-                });
-                return out;
-            }""")
-            for i, s in enumerate(slots):
-                s['index'] = i
+            body = await page.inner_text('body')
+            labels = re.findall(r'最后保存[：:]\s*([^\n]+)', body)
+            if not labels:
+                labels = re.findall(r'Last Save[d]?[：:]\s*([^\n]+)', body, re.I)
+            slots = [{'index': i, 'label': f'最后保存： {t.strip()}'} for i, t in enumerate(labels)]
+            log(f'[Adapter] 枚举到 {len(slots)} 个角色: {[s["label"] for s in slots]}')
             return slots
         except Exception as e:
-            log(f'[Adapter] JS 枚举角色失败，回退 DOM: {e}')
-
-        # DOM 兜底
-        loc = page.locator('text=最后保存:visible, text=Last Save:visible')
-        count = await loc.count()
-        for i in range(count):
-            try:
-                text = await loc.nth(i).inner_text()
-                slots.append({'index': i, 'label': text.strip()})
-            except Exception:
-                continue
-        return slots
+            log(f'[Adapter] 提取存档槽失败: {e}')
+            return []
 
     async def select_character(self, page: Page, index: int) -> bool:
-        """选择第 index 个存档槽并等待游戏就绪。"""
-        loc = page.locator('text=最后保存:visible, text=Last Save:visible')
-        try:
-            if await loc.count() <= index:
-                return False
-            await loc.nth(index).click(timeout=15000)
-            await page.wait_for_timeout(2500)
-            await self.browser._confirm_if_modal()
-            await self.browser._wait_game_ready()
-            log(f'[Adapter] 已选择角色 #{index} 并加载存档')
-            return True
-        except Exception as e:
-            log(f'[Adapter] 选择角色失败: {e}')
+        """选择第 index 个存档槽并等待游戏就绪（Playwright 文本定位 + JS 点击双兜底）。"""
+        if page is None:
+            log('[Adapter] select_character: page 为 None（未登录），跳过')
             return False
+        deadline = asyncio.get_event_loop().time() + 90
+        clicked = False
+        while asyncio.get_event_loop().time() < deadline and not clicked:
+            try:
+                loc = page.locator('text=最后保存:visible, text=Last Save:visible')
+                if await loc.count() > index:
+                    await loc.nth(index).click(timeout=10000)
+                    clicked = True
+                else:
+                    # JS 兜底：找「最后保存」最小元素，向上爬到可点击祖先再点
+                    r = await page.evaluate("""(idx) => {
+                        const hits = [...document.querySelectorAll('span,div')].filter(e =>
+                            e.offsetParent !== null && /最后保存|Last Save/.test(e.innerText || '')
+                            && e.children.length <= 2);
+                        hits.sort((a, b) => (a.innerText || '').length - (b.innerText || '').length);
+                        if (hits.length <= idx) return 'nofound:' + hits.length;
+                        let el = hits[idx];
+                        for (let i = 0; i < 12 && el; i++) {
+                            const cs = getComputedStyle(el);
+                            if (el.tagName === 'BUTTON' || el.tagName === 'A'
+                                || el.getAttribute('role') === 'button' || cs.cursor === 'pointer') {
+                                el.click();
+                                return 'clicked:' + el.tagName + ':' + (el.className || '').toString().slice(0, 50);
+                            }
+                            el = el.parentElement;
+                        }
+                        hits[idx].click();
+                        return 'clicked-leaf';
+                    }""", index)
+                    log(f'[Adapter] JS 点击存档槽: {r}')
+                    if str(r).startswith('clicked'):
+                        clicked = True
+            except Exception as e:
+                log(f'[Adapter] 点击存档槽异常: {e}')
+            if not clicked:
+                await asyncio.sleep(2)
+
+        if not clicked:
+            try:
+                await page.screenshot(path=os.path.join('state', 'char_select_debug.png'))
+                body = await page.inner_text('body')
+                log(f'[Adapter] 选角色失败，body 前 400 字: {body[:400]}')
+            except Exception:
+                pass
+            return False
+
+        await self.browser._confirm_if_modal()
+        await self.browser._wait_game_ready()
+        log(f'[Adapter] 已选择角色 #{index} 并加载存档')
+        return True
 
 
     async def execute_operation(self, page: Page, name: str) -> bool:
