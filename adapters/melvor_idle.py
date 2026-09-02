@@ -69,18 +69,17 @@ _JS_CARD_CLICK = r"""(name) => {
   return 'nobtn:' + name + ':' + els.length;
 }"""
 
-_JS_HEAL_CLICK = r"""(costHint) => {
-  let keys = [costHint];
-  if (costHint === '草药') keys = ['草药', 'Herb', 'herb'];
-  if (costHint === '药水') keys = ['药水', 'Potion', 'potion'];
-  if (costHint === '任意') keys = [''];
+_JS_HEAL_CLICK = r"""() => {
+  // 城镇健康恢复按钮文案形如「+10费用：-2,880」（+1/+5/+10 三档）
   const btns = [...document.querySelectorAll('button')].filter(b => {
     const t = (b.innerText || '').trim().replace(/\s/g, '');
-    return /^\+\d+/.test(t) && keys.some(k => t.includes(k)) && b.offsetParent !== null && !b.disabled;
+    return /^\+\d+费用/.test(t) && b.offsetParent !== null && !b.disabled;
   });
   if (!btns.length) return 'nobtn';
-  btns[0].click();
-  return 'clicked:' + (btns[0].innerText || '').trim().slice(0, 30);
+  const pick = (p) => btns.find(b => (b.innerText || '').trim().replace(/\s/g, '').startsWith(p));
+  const target = pick('+10') || pick('+5') || btns[0];
+  target.click();
+  return 'clicked:' + (target.innerText || '').trim().slice(0, 30);
 }"""
 
 _JS_TAB_CLICK = r"""(name) => {
@@ -346,8 +345,21 @@ class MelvorIdleAdapter(GameAdapter):
                     happiness: g(() => game.township.townData ? game.township.townData.happiness : null),
                     population: g(() => game.township.townData ? game.township.townData.population : null),
                     storage: g(() => game.township.townData ? game.township.townData.buildingStorage : null),
-                    resources: g(() => { const o = {}; for (const [id, r] of game.township.resources) { if (r && r.amount) o[id.replace(/^melvor[A-Za-z0-9]*:/, '')] = Math.floor(r.amount); } return o; }, {}),
+                    resources: g(() => {
+                        const o = {};
+                        const r = game.township.resources;
+                        const reg = (r && r.registeredObjects) ? r.registeredObjects : r;
+                        if (reg && typeof reg.forEach === 'function') {
+                            reg.forEach((v, k) => {
+                                const id = (k && k.id) ? k.id : String(k);
+                                const amt = (v && v.amount !== undefined) ? v.amount : v;
+                                if (typeof amt === 'number') o[id.replace(/^melvor[A-Za-z0-9]*:/, '')] = Math.floor(amt);
+                            });
+                        }
+                        return o;
+                    }, {}),
                 };
+                out.township.storageUsed = g(() => { let s = 0; for (const k in out.township.resources) { if (k !== 'GP') s += out.township.resources[k]; } return s; });
                 out.equipment = g(() => {
                     const res = [];
                     game.equipmentSlots.registeredObjects.forEach((slot, id) => {
@@ -859,6 +871,14 @@ class MelvorIdleAdapter(GameAdapter):
                     await loc.nth(index).click(timeout=10000)
                     clicked = True
                 else:
+                    # 新 profile 无本地存档时，云存档未显示，先点「显示云存档」
+                    show = page.locator(
+                        "button:has-text('显示云存档'):visible, button:has-text('Show Cloud Saves'):visible"
+                    )
+                    if await show.count():
+                        await show.first.click(timeout=8000)
+                        await page.wait_for_timeout(3000)
+                        continue
                     # JS 兜底：找「最后保存」最小元素，向上爬到可点击祖先再点
                     r = await page.evaluate("""(idx) => {
                         const hits = [...document.querySelectorAll('span,div')].filter(e =>
@@ -928,8 +948,28 @@ class MelvorIdleAdapter(GameAdapter):
         log(f'[操作] 恢复星象: 药水={out.get("potion")} 研究={out.get("study")} 动作={out.get("action")}')
         return out
 
+    async def _read_township_storage(self, page: Page) -> Dict[str, Any]:
+        """读取城镇仓储容量与已用（已用排除 GP 城镇金币）。"""
+        try:
+            return await page.evaluate(r"""() => {
+                const td = game.township.townData;
+                let used = 0;
+                const r = game.township.resources;
+                const reg = (r && r.registeredObjects) ? r.registeredObjects : r;
+                if (reg && typeof reg.forEach === 'function') {
+                    reg.forEach((v, k) => {
+                        const id = (k && k.id) ? k.id : String(k);
+                        if (/GP$/i.test(id)) return;  // 城镇金币不计入仓储
+                        used += (v && v.amount !== undefined) ? v.amount : (typeof v === 'number' ? v : 0);
+                    });
+                }
+                return { capacity: td ? Math.floor(td.buildingStorage) : 0, used: Math.floor(used) };
+            }""")
+        except Exception:
+            return {'capacity': 0, 'used': 0}
+
     async def _op_township_repair(self, page: Page) -> Dict[str, Any]:
-        """城镇维护：维修全部 + 健康恢复 + 建仓储基地/屋邨。"""
+        """城镇维护：维修全部 + 健康恢复至 100% + 建仓储基地/屋邨。"""
         out: Dict[str, Any] = {}
         await self.browser.nav_to(['Township', '城镇'])
         await page.wait_for_timeout(3500)
@@ -943,25 +983,25 @@ class MelvorIdleAdapter(GameAdapter):
             m = re.search(r'健康[\s:：]*\n?\s*([\d.]+)\s*%', text)
             return float(m.group(1)) if m else None
 
+        # 健康恢复至 100%（优先 +10 档）
         out['health_before'] = parse_health(await page.inner_text('body'))
         clicks = []
-        for _ in range(6):
+        for _ in range(30):
             h = parse_health(await page.inner_text('body'))
-            if h is not None and h >= 99:
+            if h is not None and h >= 100:
                 break
-            r = await page.evaluate(_JS_HEAL_CLICK, '草药')
-            clicks.append(r)
-            if not str(r).startswith('clicked'):
-                r2 = await page.evaluate(_JS_HEAL_CLICK, '药水')
-                clicks.append(r2)
-                if not str(r2).startswith('clicked'):
-                    break
-            await page.wait_for_timeout(1800)
+            r = await page.evaluate(_JS_HEAL_CLICK)
+            if str(r).startswith('clicked'):
+                clicks.append(r)
+                await page.wait_for_timeout(1800)
+                continue
+            break
         out['heal_clicks'] = clicks
         out['health_after'] = parse_health(await page.inner_text('body'))
 
+        # 建筑：屋邨
         out['build'] = {}
-        for nm, max_clicks in [('仓储基地', 6), ('大型仓储基地', 6), ('屋邨', 6)]:
+        for nm, max_clicks in [('屋邨', 6)]:
             built = 0
             for _ in range(max_clicks):
                 r = await page.evaluate(_JS_CARD_CLICK, nm)
@@ -971,7 +1011,25 @@ class MelvorIdleAdapter(GameAdapter):
                 await page.wait_for_timeout(1300)
                 await safe_confirm(page)
             out['build'][nm] = built
-        log(f'[操作] 城镇维护: 维修={t} 健康 {out["health_before"]}->{out["health_after"]} 建筑={out["build"]}')
+
+        # 仓储扩建：满仓(≥95%)则持续建「仓储基地→大型仓储基地」，直到不满或上限
+        out['storage_before'] = await self._read_township_storage(page)
+        for nm in ['仓储基地', '大型仓储基地']:
+            built = 0
+            for _ in range(12):
+                st = await self._read_township_storage(page)
+                if st['capacity'] and st['used'] / st['capacity'] < 0.95:
+                    break
+                r = await page.evaluate(_JS_CARD_CLICK, nm)
+                if not str(r).startswith('clicked'):
+                    break
+                built += 1
+                await page.wait_for_timeout(1300)
+                await safe_confirm(page)
+            out['build'][nm] = built
+        out['storage_after'] = await self._read_township_storage(page)
+        log(f'[操作] 城镇维护: 维修={t} 健康 {out["health_before"]}->{out["health_after"]} '
+            f'建筑={out["build"]} 仓储 {out["storage_before"]}->{out["storage_after"]}')
         return out
 
     async def _op_farming_plant_harvest(self, page: Page) -> Dict[str, Any]:

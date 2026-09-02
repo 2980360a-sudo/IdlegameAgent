@@ -79,5 +79,8 @@ config.local.yaml
 # State / runtime data
 state/*.json
 state/*.db
+state/*.png
+state/secret.key
+state/test_profile/
 logs/*.log
 shots/*.png
