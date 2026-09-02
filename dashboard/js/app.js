@@ -1,4 +1,4 @@
-﻿/**
+/**
  * IdleAgent — Web 控制台 (v0.6.0)
  * 登录/注册 + 仪表盘 + 个人资料
  */
@@ -485,45 +485,104 @@
         return { 'idle': '未连接', 'connected': '已连接', 'running': '运行中', 'error': '错误' }[s] || s || '';
     }
 
+    function statCard(label, value) { return '<div class="stat-card small"><div class="stat-label">' + label + '</div><div class="stat-value">' + escapeHtml(value) + '</div></div>'; }
+    function panel(title, body) { return '<div class="panel"><div class="panel-header"><span class="panel-title">' + title + '</span></div><div class="panel-body"><ul class="kv-list">' + body + '</ul></div></div>'; }
+    function kvRow(k, v) { return '<li><span class="kv-k">' + k + '</span><span class="kv-v">' + escapeHtml(v) + '</span></li>'; }
+    function fmtCompact(v) {
+        var n = Number(v);
+        if (v == null || isNaN(n)) return '-';
+        if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+        if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+        if (n >= 1e4) return (n / 1e3).toFixed(1) + 'K';
+        return n.toFixed(0);
+    }
+
     function renderMelvorData(game) {
         var el = $('#mv-data');
         if (!game) { el.innerHTML = '<div class="empty">尚未连接角色</div>'; return; }
+        var raw = game.raw_probe || {};
         var hp = game.hp || 0, maxHp = game.max_hp || 0;
+        var combat = raw.combat || {};
         var skills = game.skills || {};
-        var skillNames = Object.keys(skills).sort(function (a, b) { return (skills[b].level || 0) - (skills[a].level || 0); });
-        var ts = game.township || {};
-        var fm = game.farming || {};
-        var astro = game.astrology || {};
-        var cards = [
-            ['💰 金币', fmt(game.gold)],
-            ['💀 屠杀币', fmt(game.slayer_coins)],
-            ['📦 仓库', fmt(game.bank_used) + '/' + fmt(game.bank_max)],
-            ['❤️ 生命', hp + '/' + maxHp + (game.combat_active ? ' ⚔' : '')],
-            ['⚔ 战斗等级', fmt(game.combat_level)],
-            ['🍽 食物', game.food ? (game.food.name + '×' + game.food.qty) : '无'],
-            ['🛡 自动进食', game.auto_eat_tier != null ? ('Tier ' + game.auto_eat_tier) : '无'],
-            ['🎯 当前动作', game.active_action || '空闲']
-        ];
-        var html = '<div class="mv-stat-grid">';
-        cards.forEach(function (c) {
-            html += '<div class="stat-card small"><div class="stat-label">' + c[0] + '</div><div class="stat-value">' + escapeHtml(c[1]) + '</div></div>';
-        });
-        html += '</div>';
+        var ts = raw.township || game.township || {};
+        var fm = raw.farming || game.farming || {};
+        var astro = raw.astrology || game.astrology || {};
 
-        html += '<div class="mv-sub-grid">';
-        html += '<div><h4 class="form-section-title">技能</h4><div class="skill-chips">';
-        skillNames.slice(0, 30).forEach(function (n) {
-            html += '<span class="skill-chip">' + escapeHtml(n) + ' <b>' + (skills[n].level || 0) + '</b></span>';
-        });
+        var html = '';
+
+        // ===== 概览 =====
+        html += '<div class="mv-overview">';
+        html += '<div class="mv-char"><div class="profile-avatar">' + escapeHtml((raw.characterName || '?').charAt(0).toUpperCase()) + '</div>';
+        html += '<div><div class="profile-name">' + escapeHtml(raw.characterName || '未知角色') + '</div>';
+        html += '<div class="profile-line">总等级 ' + (raw.totalLevel != null ? raw.totalLevel : '-') + ' · 战斗等级 ' + (game.combat_level != null ? game.combat_level : '-') + '</div></div></div>';
+        html += '<div class="mv-stat-grid">';
+        html += statCard('💰 金币', fmtCompact(game.gold));
+        html += statCard('💀 屠杀币', fmtCompact(game.slayer_coins));
+        html += statCard('🙏 祈祷点', fmtCompact(combat.prayerPoints));
+        html += statCard('📦 仓库', fmt(game.bank_used) + ' / ' + fmt(game.bank_max));
+        html += statCard('🧰 物品', fmt(raw.bank ? raw.bank.itemCount : null));
+        html += statCard('🎯 当前动作', game.active_action || '空闲');
         html += '</div></div>';
 
-        html += '<div><h4 class="form-section-title">城镇 / 农务 / 星象</h4><ul class="kv-list">';
-        html += '<li>城镇等级 ' + (ts.level != null ? ts.level : '-') + ' · 健康 ' + (ts.health != null ? ts.health + '%' : '-') + ' · 人口 ' + (ts.population != null ? ts.population : '-') + '</li>';
-        html += '<li>城镇仓储 ' + (ts.storage != null ? ts.storage : '-') + ' · 幸福 ' + (ts.happiness != null ? ts.happiness : '-') + '</li>';
-        html += '<li>农务等级 ' + (fm.level != null ? fm.level : '-') + ' · 精通池 ' + (fm.pool != null ? fmt(fm.pool) : '-') + '</li>';
-        html += '<li>星象等级 ' + (astro.level != null ? astro.level : '-') + ' · 研究 ' + (astro.studying || '无') + ' · 池 ' + (astro.pool != null ? fmt(astro.pool) : '-') + '</li>';
-        html += '</ul></div>';
-        html += '</div>';
+        // ===== 战斗 =====
+        html += panel('⚔ 战斗',
+            kvRow('生命', hp + ' / ' + maxHp + (combat.active ? '（战斗中）' : '')) +
+            kvRow('食物', combat.food ? (combat.food.name + ' × ' + combat.food.qty) : '无') +
+            kvRow('自动进食', combat.autoEatTier != null ? ('Tier ' + combat.autoEatTier + (combat.autoEatThreshold != null ? ' · 阈值 ' + combat.autoEatThreshold : '')) : '无') +
+            kvRow('屠杀任务', combat.slayerTask ? (combat.slayerTask.monster + '（剩 ' + combat.slayerTask.killsLeft + '）') : '无') +
+            kvRow('激活祈祷', (combat.activePrayers && combat.activePrayers.length) ? combat.activePrayers.join('、') : '无') +
+            kvRow('装备', (raw.equipment && raw.equipment.length) ? raw.equipment.map(function (e) { return e.item; }).join(' · ') : '无')
+        );
+
+        // ===== 技能 =====
+        var names = Object.keys(skills).sort(function (a, b) { return (skills[b].level || 0) - (skills[a].level || 0); });
+        var skillHtml = '';
+        names.forEach(function (k) {
+            var sk = skills[k];
+            skillHtml += '<div class="skill-card"><div class="skill-card-name">' + escapeHtml(sk.name || k) + '</div>' +
+                '<div class="skill-card-lv">' + (sk.level || 0) + '</div>' +
+                (sk.mastery != null ? '<div class="skill-card-m">精通 ' + sk.mastery + '%</div>' : '') + '</div>';
+        });
+        html += '<div class="panel"><div class="panel-header"><span class="panel-title">技能（' + names.length + '）</span></div><div class="panel-body"><div class="skill-grid">' + skillHtml + '</div></div></div>';
+
+        // ===== 城镇 =====
+        var tsRes = '';
+        if (ts.resources && Object.keys(ts.resources).length) {
+            tsRes = Object.keys(ts.resources).slice(0, 8).map(function (k) { return k + ' ' + fmtCompact(ts.resources[k]); }).join(' · ');
+        }
+        html += panel('🏘 城镇',
+            kvRow('等级', ts.level != null ? ts.level : '-') +
+            kvRow('健康', ts.health != null ? ts.health + '%' : '-') +
+            kvRow('幸福', ts.happiness != null ? ts.happiness + '%' : '-') +
+            kvRow('人口', ts.population != null ? fmt(ts.population) : '-') +
+            kvRow('仓储', ts.storage != null ? fmtCompact(ts.storage) : '-') +
+            kvRow('资源', tsRes || '无')
+        );
+
+        // ===== 农务 / 星象 =====
+        html += panel('🌾 农务 / ✨ 星象',
+            kvRow('农务等级', fm.level != null ? fm.level : '-') +
+            kvRow('农务精通池', fm.pool != null ? fmtCompact(fm.pool) : '-') +
+            kvRow('星象等级', astro.level != null ? astro.level : '-') +
+            kvRow('研究星座', astro.studying || '无') +
+            kvRow('星象精通池', astro.pool != null ? fmtCompact(astro.pool) : '-')
+        );
+
+        // ===== 召唤 / 灵巧 / 宠物 =====
+        var sum = raw.summoning || {};
+        var agi = raw.agility || {};
+        var pets = raw.pets || {};
+        html += panel('🧬 召唤 / 🤸 灵巧 / 🐾 宠物',
+            kvRow('召唤印记', sum.marksDiscovered != null ? sum.marksDiscovered : '-') +
+            kvRow('灵巧障碍', agi.obstaclesBuilt != null ? agi.obstaclesBuilt : '-') +
+            kvRow('当前障碍', agi.activeObstacle || '无') +
+            kvRow('宠物', (pets.unlocked != null ? pets.unlocked : '-') + ' / ' + (pets.total != null ? pets.total : '-'))
+        );
+
+        // ===== 药水 =====
+        var pots = raw.potions || [];
+        html += panel('🧪 激活药水', pots.length ? pots.map(function (p) { return p.item + (p.charges != null ? '（' + p.charges + ' 次）' : ''); }).join(' · ') : '无');
+
         el.innerHTML = html;
     }
 

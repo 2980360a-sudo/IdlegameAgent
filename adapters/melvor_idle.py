@@ -78,6 +78,13 @@ class MelvorIdleAdapter(GameAdapter):
                         ? game.currencies.registeredObjects.get('melvorD:SlayerCoins') : null;
                     return c ? Math.floor(c.amount) : null;
                 });
+                out.currencies = g(() => {
+                    const o = {};
+                    for (const [id, c] of game.currencies.registeredObjects) {
+                        if (c && c.amount) o[id.replace(/^melvor[A-Za-z0-9]*:/, '')] = Math.floor(c.amount);
+                    }
+                    return o;
+                }, {});
                 out.bank = {
                     used: g(() => game.bank.occupiedSlots),
                     max: g(() => game.bank.maximumSlots),
@@ -115,6 +122,9 @@ class MelvorIdleAdapter(GameAdapter):
                         const t = game.combat && game.combat.slayerTask;
                         return t && t.monster ? { monster: t.monster.name, killsLeft: t.killsLeft } : null;
                     }),
+                    prayerPoints: g(() => game.combat.player ? game.combat.player.prayerPoints : null),
+                    activePrayers: g(() => { const a = game.combat.player && game.combat.player.activePrayers; return a ? a.map(p => p.name) : []; }, []),
+                    autoEatThreshold: g(() => game.combat.player ? game.combat.player.autoEatHPThreshold : null),
                 };
                 out.combatLevel = g(() => {
                     const p = game.combat && game.combat.player;
@@ -145,9 +155,10 @@ class MelvorIdleAdapter(GameAdapter):
                 out.skills = {};
                 g(() => {
                     for (const [id, s] of game.skills.registeredObjects) {
-                        out.skills[id] = {
-                            level: s.level,
-                            xp: Math.floor(s.xp),
+                        out.skills[id.replace(/^melvor[A-Za-z0-9]*:/, '')] = {
+                            name: s.name || '',
+                            level: s.level || 0,
+                            xp: Math.floor(s.xp || 0),
                             mastery: s.masteryLevel !== undefined ? s.masteryLevel : null,
                             masteryPool: s.masteryPoolXP !== undefined ? Math.floor(s.masteryPoolXP) : null,
                         };
@@ -165,6 +176,9 @@ class MelvorIdleAdapter(GameAdapter):
                     return o;
                 }, []);
                 out.characterName = g(() => game.characterName);
+                out.totalLevel = g(() => { let t = 0; for (const [, s] of game.skills.registeredObjects) t += s.level || 0; return t; });
+                out.activeActionTimeLeft = g(() => game.activeAction && game.activeAction.timeLeft !== undefined ? Math.floor(game.activeAction.timeLeft) : null);
+                out.lastCloudSave = g(() => game._lastCloudUpdate);
                 out.astrology = {
                     level: g(() => game.astrology.level),
                     xp: g(() => Math.floor(game.astrology.xp)),
@@ -181,7 +195,39 @@ class MelvorIdleAdapter(GameAdapter):
                     happiness: g(() => game.township.townData ? game.township.townData.happiness : null),
                     population: g(() => game.township.townData ? game.township.townData.population : null),
                     storage: g(() => game.township.townData ? game.township.townData.buildingStorage : null),
+                    resources: g(() => { const o = {}; for (const [id, r] of game.township.resources) { if (r && r.amount) o[id.replace(/^melvor[A-Za-z0-9]*:/, '')] = Math.floor(r.amount); } return o; }, {}),
                 };
+                out.equipment = g(() => {
+                    const res = [];
+                    game.equipmentSlots.registeredObjects.forEach((slot, id) => {
+                        const it = g(() => game.combat.player.equipment.getItemInSlot(id), null);
+                        if (it) res.push({ slot: id.replace(/^melvor[A-Za-z0-9]*:/, ''), item: (it.name || '').replace(/^melvor[A-Za-z0-9]*:/, '') });
+                    });
+                    return res;
+                }, []);
+                out.summoning = g(() => {
+                    const marks = [];
+                    game.summoning.actions.registeredObjects.forEach(a => {
+                        const ml = g(() => game.summoning.getMarkLevel(a), 0);
+                        if (ml > 0) marks.push({ name: a.name, markLevel: ml });
+                    });
+                    return { marksDiscovered: marks.length, marks: marks.slice(0, 24) };
+                }, { marksDiscovered: 0, marks: [] });
+                out.agility = {
+                    obstaclesBuilt: g(() => {
+                        const v = game.agility.obstacleBuildCount;
+                        if (typeof v === 'number') return v;
+                        if (v && typeof v.size === 'number') return v.size;
+                        if (v && typeof v === 'object') return Object.keys(v).length;
+                        return 0;
+                    }),
+                    activeObstacle: g(() => game.agility.currentlyActiveObstacle ? game.agility.currentlyActiveObstacle.name : null),
+                };
+                out.pets = g(() => {
+                    let unlocked = 0, total = 0;
+                    game.pets.registeredObjects.forEach(p => { total++; if (game.petManager.unlocked.has(p)) unlocked++; });
+                    return { unlocked, total };
+                }, { unlocked: 0, total: 0 });
                 out._debug = g(() => {
                     const p = game.combat && game.combat.player;
                     const st = p && p.stats;
@@ -260,11 +306,10 @@ class MelvorIdleAdapter(GameAdapter):
     def _build_state(self, data: Dict[str, Any]) -> GameState:
         """把 JS 注入的原始字典转换为统一 GameState。"""
         skills: Dict[str, SkillInfo] = {}
-        for raw_id, s in (data.get('skills') or {}).items():
-            name = re.sub(r'^melvor\w*:', '', str(raw_id))
+        for key, s in (data.get('skills') or {}).items():
             try:
-                skills[name] = SkillInfo(
-                    name=name,
+                skills[key] = SkillInfo(
+                    name=s.get('name') or key,
                     level=self._num(s.get('level')) or 0,
                     xp=self._num(s.get('xp')) or 0,
                     mastery_level=self._num(s.get('mastery')),

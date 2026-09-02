@@ -1,4 +1,4 @@
-﻿/* IdleAgent Dashboard Styles v0.6.0 */
+/* IdleAgent Dashboard Styles v0.6.0 */
 :root{
 --bg-primary:#0f1117;
 --bg-secondary:#161922;
@@ -266,8 +266,18 @@ cursor:pointer;transition:var(--transition)}
 font-size:12px;padding:4px 10px;border-radius:20px;
 background:var(--bg-tertiary);border:1px solid var(--border-color);color:var(--text-secondary)}
 .skill-chip b{color:var(--accent-primary)}
-.kv-list{list-style:none;display:flex;flex-direction:column;gap:6px}
-.kv-list li{font-size:13px;color:var(--text-secondary)}
+.kv-list{list-style:none;display:flex;flex-direction:column;gap:8px}
+.kv-list li{display:flex;justify-content:space-between;font-size:13px;gap:12px;border-bottom:1px solid var(--border-color);padding-bottom:6px}
+.kv-list li:last-child{border-bottom:none;padding-bottom:0}
+.kv-k{color:var(--text-muted);flex-shrink:0}
+.kv-v{color:var(--text-primary);text-align:right;word-break:break-all}
+.mv-overview{display:flex;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap}
+.mv-char{display:flex;align-items:center;gap:12px;min-width:200px}
+.skill-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px}
+.skill-card{background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:var(--radius-sm);padding:10px;text-align:center}
+.skill-card-name{font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.skill-card-lv{font-size:20px;font-weight:700;font-family:var(--font-mono);color:var(--accent-primary)}
+.skill-card-m{font-size:10px;color:var(--text-muted)}
 .log-two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .log-list{list-style:none;display:flex;flex-direction:column;gap:6px;max-height:320px;overflow-y:auto}
 .log-item{
