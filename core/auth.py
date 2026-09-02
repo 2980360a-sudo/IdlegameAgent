@@ -1,4 +1,4 @@
-# IdleAgent v0.5.0 - core/auth.py
+﻿# IdleAgent v0.6.0 - core/auth.py
 # 用户认证核心：密码哈希 + 签名 token + SQLite 用户存储（无第三方依赖）
 
 import os

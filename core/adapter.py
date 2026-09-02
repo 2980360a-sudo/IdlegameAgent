@@ -1,4 +1,4 @@
-﻿# IdleAgent v0.5.0 - core/adapter.py
+﻿# IdleAgent v0.6.0 - core/adapter.py
 # GameAdapter 抽象基类：每个新游戏只需实现 4 个接口，核心引擎完全复用
 
 import os

@@ -1,8 +1,8 @@
-# IdleAgent v0.5.0 🎮🤖
+# IdleAgent v0.6.0 🎮🤖
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/Version-0.5.0-green.svg)]()
+[![Version](https://img.shields.io/badge/Version-0.6.0-green.svg)]()
 [![Status](https://img.shields.io/badge/Status-Beta-orange.svg)]()
 
 一个基于 LLM 的通用挂机游戏（Idle/Incremental Games）自动化决策 Agent 框架。支持多游戏接入、可配置决策规则、可审计决策日志与持续策略学习。
@@ -13,14 +13,15 @@
 
 ## 版本信息
 
-- **当前版本**: v0.5.0
+- **当前版本**: v0.6.0
 - **发布日期**: 2026-09-03
-- **更新内容**: 新增用户注册/登录与用户信息存储（`core/auth.py` 密码哈希 + 签名 token + SQLite 用户库，`/api/auth/*` 路由）；前端重构为登录/注册 + 仪表盘 + 个人资料三大页面
+- **更新内容**: 新增 Melvor 挂机 Agent（仪表盘内登录云账号、选择角色、抓取角色数据展示）；接入 LLM 并实现三种运行模式（最高效率 / 极限不死亡 / 用户脚本）；追踪账号事件与决策日志
 
 ### 版本历史
 
 | 版本 | 日期 | 更新内容 |
 |------|------|---------|
+| v0.6.0 | 2026-09-03 | 新增 Melvor 挂机 Agent：云账号登录 + 角色选择 + 角色数据抓取展示；LLM 决策 + 三种运行模式（效率/不死亡/用户脚本）；事件与决策日志追踪（`core/melvor_agent.py` + `/api/melvor/*`） |
 | v0.5.0 | 2026-09-03 | 新增用户认证（注册/登录/资料，`core/auth.py` + `/api/auth/*`）；前端重构为登录/注册 + 仪表盘 + 个人资料 |
 | v0.4.0 | 2026-09-03 | 完成「真实适配器接入引擎」「LLM 决策（DeepSeek）」「SQLite 持久化」；修复适配器/数据模型不一致、`/health` 被静态挂载遮蔽、损坏的 `__init__.py` 与 `melvor.py`；新增 `core/llm.py`、`core/storage.py`、`tests/test_smoke.py` |
 | v0.3.0 | 2026-09-02 | 修复 `browser.py`/`main.py` 换行问题；API 服务可用；WebSocket 心跳正常；前端联调通过 |
@@ -74,6 +75,7 @@
 - ✅ **弹窗安全协议** — 危险词/交易词/损失警告黑名单，绝不误操作
 - ✅ **SQLite 持久化** — 决策日志、状态快照、决策审计入库，支持历史回溯
 - ✅ **真实适配器接入** — `MelvorIdleAdapter.read_state()` 驱动引擎，Web 控制台可切换真实/模拟数据
+- ✅ **Melvor 挂机 Agent** — 仪表盘登录云账号、选择角色、抓取角色数据；三种运行模式（最高效率 / 极限不死亡 / 用户脚本）；事件与决策日志追踪
 - 🔄 **社区学习机制** — Agent 主动学习攻略并迭代自身策略（规划中）
 
 ---
@@ -135,7 +137,7 @@ python tests/test_smoke.py
 ## 目录结构
 
 ```
-IdleAgent/ v0.5.0
+IdleAgent/ v0.6.0
 ├── .env.example              # 环境变量模板（脱敏）
 ├── requirements.txt          # Python 依赖
 ├── .gitignore                # Git 忽略规则
@@ -148,6 +150,7 @@ IdleAgent/ v0.5.0
 │   ├── managers.py           # WebSocket 连接管理器
 │   └── routes/               # API 路由
 │       ├── auth.py           # 用户认证：注册/登录/登出/我的信息/更新
+│       ├── melvor.py         # Melvor Agent：登录/角色/模式/启停/状态/日志
 │       ├── status.py         # GET /api/status — 游戏状态
 │       ├── control.py        # POST /api/control/{start|stop|pause} — 启停控制
 │       ├── logs.py           # GET /api/logs — 决策日志查询
@@ -157,11 +160,12 @@ IdleAgent/ v0.5.0
 │   ├── adapter.py            # GameAdapter 抽象基类（4个接口契约 + YAML 规则加载）
 │   ├── state.py              # Pydantic 数据模型（GameState/Action/GameEvent/枚举...）
 │   ├── auth.py               # 用户认证（密码哈希 + 签名 token + SQLite 用户存储）
+│   ├── melvor_agent.py       # Melvor 挂机会话（账号存储 + 三种运行模式 + 事件/决策追踪）
 │   ├── browser.py            # Playwright 浏览器管理（启动/登录/存档/导航）
 │   ├── safety.py             # 弹窗安全系统（危险词/交易词/损失警告黑名单）
 │   ├── engine.py             # 四层引擎：诊断/规划/决策/执行（含条件求值 + LLM 决策）
 │   ├── llm.py                # LLM 客户端（DeepSeek/OpenAI 兼容，httpx 实现）
-│   ├── storage.py            # SQLite 持久化（日志/状态快照/决策审计）
+│   ├── storage.py            # SQLite 持久化（日志/状态快照/决策审计/事件）
 │   └── scheduler.py          # APScheduler 定时任务调度
 ├── adapters/                 # 游戏适配器
 │   ├── __init__.py
@@ -203,7 +207,7 @@ IdleAgent/ v0.5.0
 
 | 游戏 | 状态 | 完成度 |
 |------|------|--------|
-| [Melvor Idle](https://melvoridle.com) | v0.5.0 可用 | 适配器完整，JS 注入 + DOM 解析双策略，守卫操作、状态读取、动作执行已接入引擎 |
+| [Melvor Idle](https://melvoridle.com) | v0.6.0 可用 | 适配器完整，JS 注入 + DOM 解析双策略，守卫操作、状态读取、动作执行、三种运行模式已接入引擎 |
 | Clicker Heroes | 计划中 | 适配器模板待开发 |
 | NGU Idle | 计划中 | — |
 
@@ -223,6 +227,15 @@ IdleAgent/ v0.5.0
 | POST | `/api/auth/logout` | 登出 |
 | GET | `/api/auth/me` | 获取当前登录用户（需 Bearer token） |
 | PATCH | `/api/auth/me` | 更新资料（昵称/邮箱/备注/密码） |
+| GET | `/api/melvor/modes` | 获取三种运行模式 |
+| POST | `/api/melvor/login` | 登录 Melvor 云账号 |
+| GET | `/api/melvor/characters` | 获取存档槽（角色）列表 |
+| POST | `/api/melvor/select` | 选择角色 |
+| POST | `/api/melvor/start` | 启动挂机 Agent（efficiency / survival / manual） |
+| POST | `/api/melvor/stop` | 停止 Agent |
+| GET | `/api/melvor/status` | 获取角色数据与运行状态 |
+| GET | `/api/melvor/events` | 获取账号事件日志 |
+| GET | `/api/melvor/decisions` | 获取决策日志 |
 | GET | `/api/status` | 获取当前游戏状态（模拟或真实数据，取决于 `USE_REAL_ADAPTER`） |
 | POST | `/api/control/start` | 启动 Agent |
 | POST | `/api/control/stop` | 停止 Agent |

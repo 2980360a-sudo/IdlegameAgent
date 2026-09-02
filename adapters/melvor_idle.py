@@ -1,5 +1,5 @@
 ﻿"""
-Melvor Idle 适配器 - v0.5.0
+Melvor Idle 适配器 - v0.6.0
 游戏网址: https://melvoridle.com
 实现方式: 优先注入 JS 读取 window.game 对象，失败时回退到 DOM 解析
 """
@@ -79,12 +79,29 @@ class MelvorIdleAdapter(GameAdapter):
                         ? game.currencies.registeredObjects.get('melvorD:SlayerCoins') : null;
                     return c ? Math.floor(c.amount) : null;
                 });
-                out.bank = { used: g(() => game.bank.occupiedSlots), max: g(() => game.bank.maximumSlots) };
+                out.bank = {
+                    used: g(() => game.bank.occupiedSlots),
+                    max: g(() => game.bank.maximumSlots),
+                    itemCount: g(() => game.bank.items.size),
+                    lockedCount: g(() => { let n = 0; game.bank.items.forEach((bi) => { if (bi && bi.locked) n++; }); return n; }),
+                };
                 out.combat = {
                     active: g(() => game.combat ? game.combat.isActive : false),
                     hp: g(() => (game.combat && game.combat.player) ? Math.floor(game.combat.player.hitpoints) : null),
                     maxHp: g(() => (game.combat && game.combat.player) ? Math.floor(game.combat.player.maxHitpoints) : null),
+                    food: g(() => {
+                        const f = game.combat && game.combat.player && game.combat.player.food;
+                        if (!f || !f.slots) return null;
+                        const slot = f.slots[f.selectedSlot] || f.slots[0];
+                        return slot && slot.item ? { name: slot.item.name, qty: slot.quantity } : null;
+                    }),
+                    autoEatTier: g(() => game.autoEatTier),
+                    slayerTask: g(() => {
+                        const t = game.combat && game.combat.slayerTask;
+                        return t && t.monster ? { monster: t.monster.name, killsLeft: t.killsLeft } : null;
+                    }),
                 };
+                out.combatLevel = g(() => game.combatLevel);
                 out.activeAction = g(() => game.activeAction ? game.activeAction.constructor.name : null);
                 out.skills = {};
                 g(() => {
@@ -109,7 +126,23 @@ class MelvorIdleAdapter(GameAdapter):
                     return o;
                 }, []);
                 out.characterName = g(() => game.characterName);
-                out.township = g(() => ({ level: game.township.level }));
+                out.astrology = {
+                    level: g(() => game.astrology.level),
+                    xp: g(() => Math.floor(game.astrology.xp)),
+                    pool: g(() => Math.floor(game.astrology.masteryPoolXP)),
+                    studying: g(() => game.astrology.studiedConstellation ? game.astrology.studiedConstellation.name : null),
+                };
+                out.farming = {
+                    level: g(() => game.farming.level),
+                    pool: g(() => Math.floor(game.farming.masteryPoolXP)),
+                };
+                out.township = {
+                    level: g(() => game.township.level),
+                    health: g(() => game.township.health),
+                    happiness: g(() => game.township.happiness),
+                    population: g(() => game.township.citizens),
+                    storage: g(() => game.township.townData ? game.township.townData.buildingStorage : null),
+                };
                 return out;
             }""")
 
@@ -162,8 +195,16 @@ class MelvorIdleAdapter(GameAdapter):
             combat_active=bool(combat.get('active')),
             hp=combat.get('hp'),
             max_hp=combat.get('maxHp'),
+            combat_level=data.get('combatLevel'),
+            food=combat.get('food'),
+            auto_eat_tier=combat.get('autoEatTier'),
+            slayer_task=combat.get('slayerTask'),
             active_potions=data.get('potions') or [],
             township=data.get('township'),
+            farming=data.get('farming'),
+            astrology=data.get('astrology'),
+            bank_item_count=bank.get('itemCount'),
+            bank_locked_count=bank.get('lockedCount'),
             raw_probe=data,
         )
 
@@ -451,6 +492,103 @@ class MelvorIdleAdapter(GameAdapter):
                 "() => game.activeAction ? game.activeAction.constructor.name : null"
             )
         return out
+
+
+# ------------------------------------------------------------
+# 7. 云账号登录与角色管理
+# ------------------------------------------------------------
+    async def set_credentials(self, account: str = None, password: str = None):
+        """动态设置浏览器登录凭证（用于仪表盘内登录 Melvor 云账号）。"""
+        if account is not None:
+            self.browser.account = account
+        if password is not None:
+            self.browser.password = password
+
+    async def login_cloud(self, account: str = None, password: str = None):
+        """启动浏览器并登录云账号，停在角色选择页（不加载存档）。"""
+        await self.set_credentials(account, password)
+        if self.browser.page is None:
+            await self.browser.launch()
+        await self.browser.navigate()
+        # 登录 + 语言切换，停在角色选择页（不自动加载存档）
+        await self.browser._boot_to_char_select()
+        return self.browser.page
+
+    async def list_characters(self, page: Page) -> List[Dict[str, Any]]:
+        """枚举角色选择页的存档槽（角色）。"""
+        slots: List[Dict[str, Any]] = []
+        try:
+            slots = await page.evaluate("""() => {
+                const out = [];
+                const seen = new Set();
+                const els = [...document.querySelectorAll('*')].filter(e =>
+                    e.children.length === 0 && /最后保存|Last Save/i.test(e.innerText || ''));
+                els.forEach((el) => {
+                    const txt = (el.innerText || '').trim();
+                    if (seen.has(txt)) return;
+                    seen.add(txt);
+                    out.push({ label: txt });
+                });
+                return out;
+            }""")
+            for i, s in enumerate(slots):
+                s['index'] = i
+            return slots
+        except Exception as e:
+            log(f'[Adapter] JS 枚举角色失败，回退 DOM: {e}')
+
+        # DOM 兜底
+        loc = page.locator('text=最后保存:visible, text=Last Save:visible')
+        count = await loc.count()
+        for i in range(count):
+            try:
+                text = await loc.nth(i).inner_text()
+                slots.append({'index': i, 'label': text.strip()})
+            except Exception:
+                continue
+        return slots
+
+    async def select_character(self, page: Page, index: int) -> bool:
+        """选择第 index 个存档槽并等待游戏就绪。"""
+        loc = page.locator('text=最后保存:visible, text=Last Save:visible')
+        try:
+            if await loc.count() <= index:
+                return False
+            await loc.nth(index).click(timeout=15000)
+            await page.wait_for_timeout(2500)
+            await self.browser._confirm_if_modal()
+            await self.browser._wait_game_ready()
+            log(f'[Adapter] 已选择角色 #{index} 并加载存档')
+            return True
+        except Exception as e:
+            log(f'[Adapter] 选择角色失败: {e}')
+            return False
+
+
+    async def execute_operation(self, page: Page, name: str) -> bool:
+        """执行命名维护操作（供「用户脚本」模式调用）。"""
+        name = (name or '').strip().lower()
+        if name in ('resume_astrology', 'astro', 'study', '研究星象'):
+            # 复用守卫逻辑：激活星尘药水 III + 恢复研究海密尔
+            try:
+                result = await self.guards(page)
+                return bool(result and not result.get('error'))
+            except Exception as e:
+                log(f'[Adapter] 恢复星象失败: {e}')
+                return False
+        if name in ('force_save', 'save', '保存'):
+            return await self.browser.force_save()
+        if name in ('township_repair', 'township', '城镇维护'):
+            await self.browser.nav_to(['Township', '城镇'])
+            return True
+        if name in ('farming_plant_harvest', 'farming', '农务'):
+            await self.browser.nav_to(['Farming', '农务'])
+            return True
+        if name in ('combat_probe', 'combat', '战斗'):
+            await self.browser.nav_to(['Combat', '战斗'])
+            return True
+        log(f'[Adapter] 未知操作: {name}')
+        return False
 
 
 # ------------------------------------------------------------

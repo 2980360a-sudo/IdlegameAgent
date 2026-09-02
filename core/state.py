@@ -1,4 +1,4 @@
-﻿# IdleAgent v0.5.0 - core/state.py
+﻿# IdleAgent v0.6.0 - core/state.py
 # 统一数据模型：所有引擎与适配器共享的 Pydantic 结构
 
 from enum import Enum
@@ -83,9 +83,16 @@ class GameState(BaseModel):
     combat_active: bool = False
     hp: Optional[int] = None
     max_hp: Optional[int] = None
+    combat_level: Optional[int] = None
+    food: Optional[Dict[str, Any]] = None
+    auto_eat_tier: Optional[int] = None
+    slayer_task: Optional[Dict[str, Any]] = None
     death_popup_visible: bool = False
     township: Optional[Dict[str, Any]] = None
     farming: Optional[Dict[str, Any]] = None
+    astrology: Optional[Dict[str, Any]] = None
+    bank_item_count: Optional[int] = None
+    bank_locked_count: Optional[int] = None
     active_potions: List[Dict[str, Any]] = Field(default_factory=list)
     raw_probe: Optional[Dict[str, Any]] = None
     completion_percent: Optional[float] = None

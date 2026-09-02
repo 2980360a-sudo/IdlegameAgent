@@ -1,4 +1,4 @@
-/* IdleAgent Dashboard Styles v0.5.0 */
+﻿/* IdleAgent Dashboard Styles v0.6.0 */
 :root{
 --bg-primary:#0f1117;
 --bg-secondary:#161922;
@@ -242,10 +242,54 @@ animation:toastIn .25s ease-out;max-width:360px}
 .toast-out{opacity:0;transition:opacity .4s}
 @keyframes toastIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
 
+/* ============ 梅尔沃放置模块 ============ */
+.melvor-grid{display:grid;grid-template-columns:360px 1fr;gap:16px;align-items:start}
+.melvor-left,.melvor-right{display:flex;flex-direction:column;gap:16px}
+.mt{margin-top:16px}
+.btn-row{display:flex;gap:10px}
+.mono{font-family:var(--font-mono);font-size:12px;line-height:1.5}
+.mode-list{display:flex;flex-direction:column;gap:8px}
+.mode-card{
+display:flex;align-items:flex-start;gap:10px;padding:12px 14px;
+background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:var(--radius-sm);
+cursor:pointer;transition:var(--transition)}
+.mode-card:hover{border-color:#3a3f55}
+.mode-card input[type=radio]{margin-top:4px;accent-color:var(--accent-primary)}
+.mode-card-title{font-size:14px;font-weight:600}
+.mode-card-desc{font-size:12px;color:var(--text-secondary);margin-top:2px}
+.mv-stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.stat-card.small{padding:14px}
+.stat-card.small .stat-value{font-size:20px}
+.mv-sub-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.skill-chips{display:flex;flex-wrap:wrap;gap:6px}
+.skill-chip{
+font-size:12px;padding:4px 10px;border-radius:20px;
+background:var(--bg-tertiary);border:1px solid var(--border-color);color:var(--text-secondary)}
+.skill-chip b{color:var(--accent-primary)}
+.kv-list{list-style:none;display:flex;flex-direction:column;gap:6px}
+.kv-list li{font-size:13px;color:var(--text-secondary)}
+.log-two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.log-list{list-style:none;display:flex;flex-direction:column;gap:6px;max-height:320px;overflow-y:auto}
+.log-item{
+padding:10px 12px;background:var(--bg-tertiary);border-radius:var(--radius-sm);
+border-left:3px solid var(--border-color);font-size:13px}
+.log-item.warning{border-left-color:var(--accent-warning)}
+.log-item.critical,.log-item.error{border-left-color:var(--accent-danger)}
+.log-item.decision{border-left-color:var(--accent-primary)}
+.log-item .empty{border-left-color:transparent;color:var(--text-muted)}
+.log-time{font-size:11px;color:var(--text-muted);font-family:var(--font-mono)}
+.log-content{color:var(--text-secondary);font-size:12px;line-height:1.5}
+.log-content strong{color:var(--text-primary)}
+.log-content small{color:var(--text-muted)}
+
 /* ============ 响应式 ============ */
 @media(max-width:900px){
 .dashboard-stats{grid-template-columns:repeat(2,1fr)}
 .profile-grid{grid-template-columns:1fr}
+.melvor-grid{grid-template-columns:1fr}
+.mv-stat-grid{grid-template-columns:repeat(2,1fr)}
+.mv-sub-grid{grid-template-columns:1fr}
+.log-two-col{grid-template-columns:1fr}
 .sidebar{width:200px}
 .main-content{margin-left:200px}
 }

@@ -1,4 +1,4 @@
-﻿# IdleAgent v0.5.0 - core/scheduler.py
+﻿# IdleAgent v0.6.0 - core/scheduler.py
 # Agent 调度器：诊断 / 决策 / 执行 / 紧急检查的定时任务
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler

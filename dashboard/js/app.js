@@ -1,5 +1,5 @@
-/**
- * IdleAgent — Web 控制台 (v0.5.0)
+﻿/**
+ * IdleAgent — Web 控制台 (v0.6.0)
  * 登录/注册 + 仪表盘 + 个人资料
  */
 (function () {
@@ -42,7 +42,20 @@
         me: function () { return API.request('GET', '/auth/me'); },
         updateMe: function (p) { return API.request('PATCH', '/auth/me', p); },
         getStatus: function () { return API.request('GET', '/status'); },
-        getLogs: function (limit) { return API.request('GET', '/logs?limit=' + (limit || 100)); }
+        getLogs: function (limit) { return API.request('GET', '/logs?limit=' + (limit || 100)); },
+        // Melvor 挂机
+        melvorModes: function () { return API.request('GET', '/melvor/modes'); },
+        melvorConfig: function () { return API.request('GET', '/melvor/config'); },
+        melvorLogin: function (p) { return API.request('POST', '/melvor/login', p); },
+        melvorCharacters: function () { return API.request('GET', '/melvor/characters'); },
+        melvorSelect: function (p) { return API.request('POST', '/melvor/select', p); },
+        melvorStart: function (p) { return API.request('POST', '/melvor/start', p); },
+        melvorStop: function () { return API.request('POST', '/melvor/stop'); },
+        melvorDisconnect: function () { return API.request('POST', '/melvor/disconnect'); },
+        melvorStatus: function () { return API.request('GET', '/melvor/status'); },
+        melvorEvents: function () { return API.request('GET', '/melvor/events'); },
+        melvorDecisions: function () { return API.request('GET', '/melvor/decisions'); },
+        melvorScript: function (p) { return API.request('POST', '/melvor/script', p); }
     };
 
     // ============================================================
@@ -198,12 +211,14 @@
         });
         var titles = {
             dashboard: ['仪表盘', '实时监控游戏 Agent 运行状态'],
+            melvor: ['梅尔沃放置', '登录云账号、选择角色、运行挂机 Agent'],
             profile: ['个人资料', '查看与编辑你的账户信息']
         };
         var t = titles[page] || titles.dashboard;
         $('#pageTitle').textContent = t[0];
         $('#pageSubtitle').textContent = t[1];
-        if (page === 'profile') renderProfile();
+        if (page === 'melvor') renderMelvor();
+        else if (page === 'profile') renderProfile();
         else renderDashboard();
     }
 
@@ -348,6 +363,238 @@
                 toast(err.message, true);
                 btn.disabled = false; btn.textContent = '更新密码';
             });
+        });
+    }
+
+    // ============================================================
+    // 梅尔沃放置
+    // ============================================================
+    var melvorPollTimer = null;
+
+    function clearMelvorPoll() {
+        if (melvorPollTimer) { clearInterval(melvorPollTimer); melvorPollTimer = null; }
+    }
+
+    function renderMelvor() {
+        clearMelvorPoll();
+        $('#contentArea').innerHTML = '' +
+            '<div class="melvor-grid">' +
+            '  <div class="melvor-left">' +
+            '    <div class="panel"><div class="panel-header"><span class="panel-title">① 连接云账号</span><span class="panel-hint" id="mv-session"></span></div>' +
+            '      <div class="panel-body">' +
+            '        <div class="form-group"><label>账号</label><input id="mv-account" class="form-input" autocomplete="username"></div>' +
+            '        <div class="form-group"><label>密码</label><input id="mv-password" type="password" class="form-input" autocomplete="current-password"></div>' +
+            '        <button class="btn btn-primary" id="mv-login-btn">登录并读取角色</button>' +
+            '        <div id="mv-characters" class="hidden mt">' +
+            '          <div class="form-group"><label>选择角色（存档槽）</label><select id="mv-char-select" class="form-input"></select></div>' +
+            '          <button class="btn btn-ghost" id="mv-select-btn">加载该角色</button>' +
+            '        </div>' +
+            '      </div>' +
+            '    </div>' +
+            '    <div class="panel"><div class="panel-header"><span class="panel-title">② 运行模式</span></div>' +
+            '      <div class="panel-body">' +
+            '        <div id="mv-modes" class="mode-list"></div>' +
+            '        <div id="mv-script-editor" class="hidden mt">' +
+            '          <div class="form-group"><label>脚本（JSON 动作列表，仅「用户脚本」模式）</label>' +
+            '            <textarea id="mv-script" class="form-input mono" rows="8" spellcheck="false"></textarea></div>' +
+            '          <button class="btn btn-ghost btn-sm" id="mv-script-save">保存脚本</button>' +
+            '        </div>' +
+            '        <div class="mt btn-row">' +
+            '          <button class="btn btn-primary" id="mv-start-btn">▶ 启动</button>' +
+            '          <button class="btn btn-ghost" id="mv-stop-btn">■ 停止</button>' +
+            '          <button class="btn btn-ghost" id="mv-disconnect-btn">断开</button>' +
+            '        </div>' +
+            '      </div>' +
+            '    </div>' +
+            '  </div>' +
+            '  <div class="melvor-right">' +
+            '    <div class="panel"><div class="panel-header"><span class="panel-title">③ 角色数据</span><span class="panel-hint" id="mv-mode-label"></span></div>' +
+            '      <div class="panel-body" id="mv-data"><div class="empty">尚未连接角色</div></div>' +
+            '    </div>' +
+            '    <div class="panel"><div class="panel-header"><span class="panel-title">④ 事件与决策日志</span></div>' +
+            '      <div class="panel-body log-two-col">' +
+            '        <div><h4 class="form-section-title">事件</h4><ul id="mv-events" class="log-list"></ul></div>' +
+            '        <div><h4 class="form-section-title">决策</h4><ul id="mv-decisions" class="log-list"></ul></div>' +
+            '      </div>' +
+            '    </div>' +
+            '  </div>' +
+            '</div>';
+
+        loadMelvorModes();
+        loadMelvorConfig();
+        bindMelvor();
+        refreshMelvor();
+        melvorPollTimer = setInterval(refreshMelvor, 5000);
+    }
+
+    function loadMelvorModes() {
+        API.melvorModes().then(function (data) {
+            var modes = data.modes || [];
+            var html = '';
+            modes.forEach(function (m) {
+                html += '<label class="mode-card"><input type="radio" name="mv-mode" value="' + m.value + '">' +
+                    '<div><div class="mode-card-title">' + escapeHtml(m.label) + '</div>' +
+                    '<div class="mode-card-desc">' + escapeHtml(m.description) + '</div></div></label>';
+            });
+            $('#mv-modes').innerHTML = html;
+            $$('input[name="mv-mode"]').forEach(function (r) {
+                r.addEventListener('change', function () {
+                    $('#mv-script-editor').classList.toggle('hidden', r.value !== 'manual');
+                });
+            });
+        });
+    }
+
+    function loadMelvorConfig() {
+        API.melvorConfig().then(function (data) {
+            var c = data.config || {};
+            if (c.account) $('#mv-account').value = c.account;
+            if (c.mode) {
+                var r = document.querySelector('input[name="mv-mode"][value="' + c.mode + '"]');
+                if (r) { r.checked = true; $('#mv-script-editor').classList.toggle('hidden', c.mode !== 'manual'); }
+            }
+            var script = c.script || [];
+            $('#mv-script').value = script.length ? JSON.stringify(script, null, 2) : defaultManualScript();
+            if (c.character_index != null) {
+                $('#mv-session').textContent = '已选角色 #' + c.character_index;
+            }
+        }).catch(function () {});
+    }
+
+    function defaultManualScript() {
+        return JSON.stringify([
+            { 'action_type': 'operation', 'target': 'resume_astrology', 'reason': '恢复星象研究' },
+            { 'action_type': 'operation', 'target': 'township_repair', 'reason': '城镇维护', 'interval': 3600 },
+            { 'action_type': 'operation', 'target': 'farming_plant_harvest', 'reason': '农务收获补种', 'interval': 3600 },
+            { 'action_type': 'operation', 'target': 'force_save', 'reason': '强制保存', 'interval': 600 }
+        ], null, 2);
+    }
+
+    function refreshMelvor() {
+        if (AppState.currentPage !== 'melvor') { clearMelvorPoll(); return; }
+        API.melvorStatus().then(function (s) {
+            $('#mv-session').textContent = sessionText(s.session_state);
+            $('#mv-mode-label').textContent = (s.mode_label || '') + (s.character_label ? ' · ' + s.character_label : '');
+            renderMelvorData(s.game);
+        }).catch(function () {});
+        API.melvorEvents().then(function (d) { renderMelvorLogs('#mv-events', d.events || [], 'event'); }).catch(function () {});
+        API.melvorDecisions().then(function (d) { renderMelvorLogs('#mv-decisions', d.decisions || [], 'decision'); }).catch(function () {});
+    }
+
+    function sessionText(s) {
+        return { 'idle': '未连接', 'connected': '已连接', 'running': '运行中', 'error': '错误' }[s] || s || '';
+    }
+
+    function renderMelvorData(game) {
+        var el = $('#mv-data');
+        if (!game) { el.innerHTML = '<div class="empty">尚未连接角色</div>'; return; }
+        var hp = game.hp || 0, maxHp = game.max_hp || 0;
+        var skills = game.skills || {};
+        var skillNames = Object.keys(skills).sort(function (a, b) { return (skills[b].level || 0) - (skills[a].level || 0); });
+        var ts = game.township || {};
+        var fm = game.farming || {};
+        var astro = game.astrology || {};
+        var cards = [
+            ['💰 金币', fmt(game.gold)],
+            ['💀 屠杀币', fmt(game.slayer_coins)],
+            ['📦 仓库', fmt(game.bank_used) + '/' + fmt(game.bank_max)],
+            ['❤️ 生命', hp + '/' + maxHp + (game.combat_active ? ' ⚔' : '')],
+            ['⚔ 战斗等级', fmt(game.combat_level)],
+            ['🍽 食物', game.food ? (game.food.name + '×' + game.food.qty) : '无'],
+            ['🛡 自动进食', game.auto_eat_tier != null ? ('Tier ' + game.auto_eat_tier) : '无'],
+            ['🎯 当前动作', game.active_action || '空闲']
+        ];
+        var html = '<div class="mv-stat-grid">';
+        cards.forEach(function (c) {
+            html += '<div class="stat-card small"><div class="stat-label">' + c[0] + '</div><div class="stat-value">' + escapeHtml(c[1]) + '</div></div>';
+        });
+        html += '</div>';
+
+        html += '<div class="mv-sub-grid">';
+        html += '<div><h4 class="form-section-title">技能</h4><div class="skill-chips">';
+        skillNames.slice(0, 30).forEach(function (n) {
+            html += '<span class="skill-chip">' + escapeHtml(n) + ' <b>' + (skills[n].level || 0) + '</b></span>';
+        });
+        html += '</div></div>';
+
+        html += '<div><h4 class="form-section-title">城镇 / 农务 / 星象</h4><ul class="kv-list">';
+        html += '<li>城镇等级 ' + (ts.level != null ? ts.level : '-') + ' · 健康 ' + (ts.health != null ? ts.health + '%' : '-') + ' · 人口 ' + (ts.population != null ? ts.population : '-') + '</li>';
+        html += '<li>城镇仓储 ' + (ts.storage != null ? ts.storage : '-') + ' · 幸福 ' + (ts.happiness != null ? ts.happiness : '-') + '</li>';
+        html += '<li>农务等级 ' + (fm.level != null ? fm.level : '-') + ' · 精通池 ' + (fm.pool != null ? fmt(fm.pool) : '-') + '</li>';
+        html += '<li>星象等级 ' + (astro.level != null ? astro.level : '-') + ' · 研究 ' + (astro.studying || '无') + ' · 池 ' + (astro.pool != null ? fmt(astro.pool) : '-') + '</li>';
+        html += '</ul></div>';
+        html += '</div>';
+        el.innerHTML = html;
+    }
+
+    function renderMelvorLogs(sel, items, kind) {
+        var el = $(sel);
+        if (!el) return;
+        if (!items.length) { el.innerHTML = '<li class="empty">暂无</li>'; return; }
+        var html = '';
+        items.forEach(function (it) {
+            var time = new Date(it.timestamp * 1000).toLocaleTimeString();
+            if (kind === 'event') {
+                html += '<li class="log-item ' + (it.severity || 'info') + '"><span class="log-time">' + time + '</span>' +
+                    '<div class="log-content"><strong>' + escapeHtml(it.event_type) + '</strong> ' +
+                    escapeHtml(JSON.stringify(it.details || {})) + '</div></li>';
+            } else {
+                var acts = (it.actions || []).map(function (a) { return a.action_type + '→' + a.target; }).join(', ');
+                html += '<li class="log-item decision"><span class="log-time">' + time + ' · ' + escapeHtml(it.mode || '') + '</span>' +
+                    '<div class="log-content">' + escapeHtml(it.reason || '') + (acts ? ' <small>[' + escapeHtml(acts) + ']</small>' : '') + '</div></li>';
+            }
+        });
+        el.innerHTML = html;
+    }
+
+    function bindMelvor() {
+        $('#mv-login-btn').addEventListener('click', function () {
+            var account = $('#mv-account').value.trim();
+            var password = $('#mv-password').value;
+            if (!account || !password) { toast('请输入账号和密码', true); return; }
+            var btn = this; btn.disabled = true; btn.textContent = '登录中...';
+            API.melvorLogin({ account: account, password: password }).then(function (data) {
+                toast('登录成功');
+                var chars = data.characters || [];
+                var sel = $('#mv-char-select');
+                sel.innerHTML = chars.map(function (c, i) { return '<option value="' + i + '">' + escapeHtml(c.label || ('角色 ' + i)) + '</option>'; }).join('');
+                $('#mv-characters').classList.remove('hidden');
+                refreshMelvor();
+            }).catch(function (err) { toast(err.message, true); })
+              .finally(function () { btn.disabled = false; btn.textContent = '登录并读取角色'; });
+        });
+
+        $('#mv-select-btn').addEventListener('click', function () {
+            var index = parseInt($('#mv-char-select').value, 10);
+            API.melvorSelect({ index: index }).then(function () { toast('角色已加载'); refreshMelvor(); })
+              .catch(function (err) { toast(err.message, true); });
+        });
+
+        $('#mv-start-btn').addEventListener('click', function () {
+            var mode = (document.querySelector('input[name="mv-mode"]:checked') || {}).value;
+            if (!mode) { toast('请选择运行模式', true); return; }
+            var payload = { mode: mode };
+            if (mode === 'manual') {
+                try { payload.script = JSON.parse($('#mv-script').value || '[]'); }
+                catch (e) { toast('脚本 JSON 格式错误', true); return; }
+            }
+            API.melvorStart(payload).then(function () { toast('已启动'); refreshMelvor(); })
+              .catch(function (err) { toast(err.message, true); });
+        });
+
+        $('#mv-stop-btn').addEventListener('click', function () {
+            API.melvorStop().then(function () { toast('已停止'); refreshMelvor(); }).catch(function (err) { toast(err.message, true); });
+        });
+
+        $('#mv-disconnect-btn').addEventListener('click', function () {
+            API.melvorDisconnect().then(function () { toast('已断开'); refreshMelvor(); }).catch(function (err) { toast(err.message, true); });
+        });
+
+        $('#mv-script-save').addEventListener('click', function () {
+            var script;
+            try { script = JSON.parse($('#mv-script').value || '[]'); }
+            catch (e) { toast('脚本 JSON 格式错误', true); return; }
+            API.melvorScript({ script: script }).then(function () { toast('脚本已保存'); }).catch(function (err) { toast(err.message, true); });
         });
     }
 

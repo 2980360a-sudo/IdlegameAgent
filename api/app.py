@@ -1,13 +1,17 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+﻿from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 import os
 from datetime import datetime
 
-from api.routes import status, rules, logs, control, auth
+# 加载 .env（uvicorn 直接启动时也生效），必须在路由导入之前
+load_dotenv()
+
+from api.routes import status, rules, logs, control, auth, melvor
 from api.managers import manager
 
-app = FastAPI(title="IdleAgent API", version="0.5.0")
+app = FastAPI(title="IdleAgent API", version="0.6.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -19,6 +23,7 @@ app.add_middleware(
 
 # 1. REST 路由（必须注册在静态文件挂载之前）
 app.include_router(auth.router, prefix="/api")
+app.include_router(melvor.router, prefix="/api")
 app.include_router(status.router, prefix="/api")
 app.include_router(rules.router, prefix="/api")
 app.include_router(logs.router, prefix="/api")
@@ -27,7 +32,7 @@ app.include_router(control.router, prefix="/api")
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "version": "0.5.0", "timestamp": datetime.now().isoformat()}
+    return {"status": "ok", "version": "0.6.0", "timestamp": datetime.now().isoformat()}
 
 
 # 2. WebSocket 路由（必须在静态文件挂载之前）
