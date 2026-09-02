@@ -76,7 +76,7 @@ _JS_HEAL_CLICK = r"""(costHint) => {
   if (costHint === '任意') keys = [''];
   const btns = [...document.querySelectorAll('button')].filter(b => {
     const t = (b.innerText || '').trim().replace(/\s/g, '');
-    return /^\+10/.test(t) && keys.some(k => t.includes(k)) && b.offsetParent !== null && !b.disabled;
+    return /^\+\d+/.test(t) && keys.some(k => t.includes(k)) && b.offsetParent !== null && !b.disabled;
   });
   if (!btns.length) return 'nobtn';
   btns[0].click();
