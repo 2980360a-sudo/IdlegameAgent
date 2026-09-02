@@ -13,10 +13,161 @@ from playwright.async_api import Page
 
 from core.adapter import GameAdapter
 from core.browser import BrowserManager, log
+from core.safety import click_text_btn, safe_confirm, dismiss_post_load_modals
 from core.state import (
     GameState, GameEvent, Action, DOMMap,
     ActionType, EventType, SkillInfo, ResourceInfo, EquipmentInfo,
 )
+
+
+# ====================================================================
+# 操作 JS 辅助（移植自 melvor222.py 的验证逻辑）
+# ====================================================================
+_JS_STUDY_CLICK = r"""(name) => {
+  const els = [...document.querySelectorAll('*')].filter(e => e.offsetParent !== null &&
+    (e.innerText || '').trim() === name);
+  els.sort((a, b) => a.innerHTML.length - b.innerHTML.length);
+  for (const el of els) {
+    let cur = el;
+    for (let i = 0; i < 8 && cur; i++) {
+      const btn = [...cur.querySelectorAll('button')].find(b => (b.innerText || '').trim() === '研究' && !b.disabled);
+      if (btn) { btn.click(); return 'clicked'; }
+      cur = cur.parentElement;
+    }
+  }
+  return 'nobtn';
+}"""
+
+_JS_POTION_ACTIVATE = r"""(name) => {
+  const els = [...document.querySelectorAll('*')].filter(e => e.offsetParent !== null &&
+    (e.innerText || '').trim() === name);
+  els.sort((a, b) => a.innerHTML.length - b.innerHTML.length);
+  for (const el of els) {
+    let cur = el;
+    for (let i = 0; i < 8 && cur; i++) {
+      const btn = [...cur.querySelectorAll('button')].find(b => /^(选择|Select)$/.test((b.innerText || '').trim()) && !b.disabled);
+      if (btn) { btn.click(); return 'clicked'; }
+      cur = cur.parentElement;
+    }
+  }
+  return 'nobtn';
+}"""
+
+_JS_CARD_CLICK = r"""(name) => {
+  const els = [...document.querySelectorAll('span,div')].filter(e =>
+    e.children.length === 0 && (e.innerText || '').trim() === name && e.offsetParent !== null);
+  if (!els.length) return 'notfound:' + name;
+  for (const el of els) {
+    let card = el;
+    for (let i = 0; i < 10 && card; i++) {
+      const b = [...card.querySelectorAll('button.btn-success')].find(x =>
+        !x.disabled && x.offsetParent !== null && x.querySelector('i.fa-hammer'));
+      if (b) { b.click(); return 'clicked'; }
+      card = card.parentElement;
+    }
+  }
+  return 'nobtn:' + name + ':' + els.length;
+}"""
+
+_JS_HEAL_CLICK = r"""(costHint) => {
+  let keys = [costHint];
+  if (costHint === '草药') keys = ['草药', 'Herb', 'herb'];
+  if (costHint === '药水') keys = ['药水', 'Potion', 'potion'];
+  if (costHint === '任意') keys = [''];
+  const btns = [...document.querySelectorAll('button')].filter(b => {
+    const t = (b.innerText || '').trim().replace(/\s/g, '');
+    return /^\+10/.test(t) && keys.some(k => t.includes(k)) && b.offsetParent !== null && !b.disabled;
+  });
+  if (!btns.length) return 'nobtn';
+  btns[0].click();
+  return 'clicked:' + (btns[0].innerText || '').trim().slice(0, 30);
+}"""
+
+_JS_TAB_CLICK = r"""(name) => {
+  const els = [...document.querySelectorAll('span,div,h1,h2,h3,h4,h5,h6,p,a,button')].filter(e =>
+    e.children.length === 0 && (e.innerText || '').trim() === name && e.offsetParent !== null);
+  if (!els.length) return 'notfound:' + name;
+  for (const el of els) {
+    let t = el;
+    for (let i = 0; i < 7 && t; i++) {
+      const cs = getComputedStyle(t);
+      if (t.tagName === 'BUTTON' || t.tagName === 'A' || cs.cursor === 'pointer') {
+        const cls = (t.className || '').toString();
+        if (/nav-link|sidebar/i.test(cls)) break;
+        t.click();
+        return 'clicked:' + t.tagName + ':' + cls.slice(0, 50);
+      }
+      t = t.parentElement;
+    }
+  }
+  return 'nobtn:' + els.length;
+}"""
+
+_JS_SEED_SELECT = r"""(seedName) => {
+  const els = [...document.querySelectorAll('div,span,a,button,li')].filter(e =>
+    (e.innerText || '').trim() === seedName && e.offsetParent !== null);
+  if (!els.length) return 'notfound:' + seedName;
+  els.sort((a, b) => (a.innerHTML.length - b.innerHTML.length));
+  const el = els[0];
+  let t = el;
+  for (let i = 0; i < 6 && t; i++) {
+    const cls = (t.className || '').toString();
+    if (t.tagName === 'BUTTON' || t.tagName === 'A' || /btn|list-group-item|clickable/i.test(cls) ||
+        getComputedStyle(t).cursor === 'pointer') { t.click(); return 'clicked-row:' + cls.slice(0, 40); }
+    t = t.parentElement;
+  }
+  el.click();
+  return 'clicked-leaf';
+}"""
+
+_JS_PLANT_CONFIRM = r"""() => {
+  const btns = [...document.querySelectorAll('button')].filter(b =>
+    (b.innerText || '').trim() === '种植' && b.offsetParent !== null && !b.disabled);
+  if (!btns.length) return 'nobtn';
+  btns.sort((a, b) => {
+    const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+    return Math.abs(ra.left - 1000) - Math.abs(rb.left - 1000);
+  });
+  btns[0].click();
+  return 'clicked:' + btns.length;
+}"""
+
+_JS_PER_PLOT_BTN = r"""() => {
+  const btns = [...document.querySelectorAll('button')].filter(b =>
+    (b.innerText || '').trim() === '栽培种子' && b.offsetParent !== null && !b.disabled);
+  if (!btns.length) return 0;
+  btns[0].click();
+  return btns.length;
+}"""
+
+_JS_BANKSLOT_BUY = r"""() => {
+  const leaves = [...document.querySelectorAll('*')].filter(e => e.offsetParent !== null &&
+    e.children.length === 0 && /额外仓库栏位|Bank Slot/i.test((e.innerText || '').trim()));
+  for (const el of leaves) {
+    let cur = el;
+    for (let i = 0; i < 8 && cur; i++) {
+      if (getComputedStyle(cur).cursor === 'pointer' || cur.tagName === 'BUTTON' ||
+          cur.getAttribute('role') === 'button') {
+        cur.click();
+        return 'clicked-pointer-ancestor';
+      }
+      cur = cur.parentElement;
+    }
+  }
+  return 'nobtn';
+}"""
+
+_JS_BANKSLOT_CONFIRM = r"""() => {
+  const pops = [...document.querySelectorAll('.swal2-popup')].filter(p => p.offsetParent !== null);
+  if (!pops.length) return 'no-modal';
+  const pop = pops[pops.length - 1];
+  const txt = (pop.innerText || '');
+  if (!/额外仓库栏位/.test(txt)) return 'wrong-modal:' + txt.slice(0, 60).replace(/\n/g, '|');
+  const btn = pop.querySelector('.swal2-confirm');
+  if (!btn) return 'no-confirm-btn';
+  btn.click();
+  return 'confirmed';
+}"""
 
 
 class MelvorIdleAdapter(GameAdapter):
@@ -751,30 +902,165 @@ class MelvorIdleAdapter(GameAdapter):
         return True
 
 
+    # ------------------------------------------------------------
+    # 命名维护操作（供「用户脚本」模式调用）
+    # ------------------------------------------------------------
+    async def _op_resume_astrology(self, page: Page) -> Dict[str, Any]:
+        """恢复星象研究海密尔 + 激活星尘药水 III。"""
+        out: Dict[str, Any] = {}
+        await self.browser.nav_to(['Astrology', '星象学'])
+        await page.wait_for_timeout(3000)
+        btn = page.locator('#page-header-potions-dropdown')
+        if await btn.count():
+            await btn.first.click()
+            await page.wait_for_timeout(2000)
+        out['potion'] = await page.evaluate(_JS_POTION_ACTIVATE, '秘密星尘药水 III')
+        await page.wait_for_timeout(2000)
+        await page.keyboard.press('Escape')
+        await page.wait_for_timeout(800)
+        cur = await page.evaluate("() => game.activeAction ? game.activeAction.constructor.name : null")
+        if cur == 'Astrology':
+            out['study'] = 'already'
+        else:
+            out['study'] = await page.evaluate(_JS_STUDY_CLICK, '海密尔')
+            await page.wait_for_timeout(2000)
+        out['action'] = await page.evaluate("() => game.activeAction ? game.activeAction.constructor.name : null")
+        log(f'[操作] 恢复星象: 药水={out.get("potion")} 研究={out.get("study")} 动作={out.get("action")}')
+        return out
+
+    async def _op_township_repair(self, page: Page) -> Dict[str, Any]:
+        """城镇维护：维修全部 + 健康恢复 + 建仓储基地/屋邨。"""
+        out: Dict[str, Any] = {}
+        await self.browser.nav_to(['Township', '城镇'])
+        await page.wait_for_timeout(3500)
+        t = await click_text_btn(page, ['维修全部', 'Repair All'])
+        out['repair'] = t
+        await page.wait_for_timeout(2000)
+        await safe_confirm(page)
+        await page.wait_for_timeout(2000)
+
+        def parse_health(text):
+            m = re.search(r'健康[\s:：]*\n?\s*([\d.]+)\s*%', text)
+            return float(m.group(1)) if m else None
+
+        out['health_before'] = parse_health(await page.inner_text('body'))
+        clicks = []
+        for _ in range(6):
+            h = parse_health(await page.inner_text('body'))
+            if h is not None and h >= 99:
+                break
+            r = await page.evaluate(_JS_HEAL_CLICK, '草药')
+            clicks.append(r)
+            if not str(r).startswith('clicked'):
+                r2 = await page.evaluate(_JS_HEAL_CLICK, '药水')
+                clicks.append(r2)
+                if not str(r2).startswith('clicked'):
+                    break
+            await page.wait_for_timeout(1800)
+        out['heal_clicks'] = clicks
+        out['health_after'] = parse_health(await page.inner_text('body'))
+
+        out['build'] = {}
+        for nm, max_clicks in [('仓储基地', 6), ('大型仓储基地', 6), ('屋邨', 6)]:
+            built = 0
+            for _ in range(max_clicks):
+                r = await page.evaluate(_JS_CARD_CLICK, nm)
+                if not str(r).startswith('clicked'):
+                    break
+                built += 1
+                await page.wait_for_timeout(1300)
+                await safe_confirm(page)
+            out['build'][nm] = built
+        log(f'[操作] 城镇维护: 维修={t} 健康 {out["health_before"]}->{out["health_after"]} 建筑={out["build"]}')
+        return out
+
+    async def _op_farming_plant_harvest(self, page: Page) -> Dict[str, Any]:
+        """农务：三类地收获 + 逐块补种。"""
+        out: Dict[str, Any] = {}
+        await self.browser.nav_to(['Farming', '农务'])
+        await page.wait_for_timeout(3500)
+        for tab, seed in [('农作物', '胡萝卜种子'), ('草药', '巴伦托尔草种子'), ('树木', '苹果树种子')]:
+            r: Dict[str, Any] = {'planted': 0}
+            r['tab'] = await page.evaluate(_JS_TAB_CLICK, tab)
+            await page.wait_for_timeout(2200)
+            r['harvest'] = await click_text_btn(page, ['收获所有农田', 'Harvest All'])
+            await page.wait_for_timeout(2000)
+            await safe_confirm(page)
+            await page.wait_for_timeout(2000)
+            for _ in range(20):
+                n = await page.evaluate(_JS_PER_PLOT_BTN)
+                if not n:
+                    break
+                await page.wait_for_timeout(2000)
+                sel = await page.evaluate(_JS_SEED_SELECT, seed)
+                if not str(sel).startswith('clicked'):
+                    await page.keyboard.press('Escape')
+                    await page.wait_for_timeout(800)
+                    continue
+                await page.wait_for_timeout(1600)
+                pc = await page.evaluate(_JS_PLANT_CONFIRM)
+                await page.wait_for_timeout(1600)
+                await page.keyboard.press('Escape')
+                await page.wait_for_timeout(800)
+                if str(pc).startswith('clicked'):
+                    r['planted'] += 1
+            out[tab] = r
+        log(f'[操作] 农务种植: {out}')
+        return out
+
+    async def _op_bank_buy_slots(self, page: Page) -> Dict[str, Any]:
+        """买仓库格（空闲<15 触发，x1 倍数安全）。"""
+        await self.browser.nav_to(['Shop', '商店'])
+        await page.wait_for_timeout(3500)
+        st = await page.evaluate(
+            "() => ({ slots: game.bank.maximumSlots, free: game.bank.maximumSlots - game.bank.occupiedSlots, gp: game.gp.amount })"
+        )
+        if st.get('free', 0) >= 15:
+            return {'note': f"空闲 {st['free']} ≥ 15，无需购买"}
+        out: Dict[str, Any] = {'before': st}
+        out['buy'] = await page.evaluate(_JS_BANKSLOT_BUY)
+        await page.wait_for_timeout(1500)
+        out['confirm'] = await page.evaluate(_JS_BANKSLOT_CONFIRM)
+        await page.wait_for_timeout(2000)
+        log(f'[操作] 买仓库格: {out}')
+        return out
+
+    async def _op_brew_stardust(self, page: Page) -> Dict[str, Any]:
+        """切换草药学配方到秘密星尘药水并开工。"""
+        await self.browser.nav_to(['Herblore', '草药学'])
+        await page.wait_for_timeout(3500)
+        r = await page.evaluate(_JS_TAB_CLICK, '秘密星尘药水')
+        await page.wait_for_timeout(2500)
+        c = await click_text_btn(page, ['创造', 'Create'])
+        await page.wait_for_timeout(2500)
+        log(f'[操作] 制作星尘药水: 配方={r} 创造={c}')
+        return {'click': r, 'create': c}
+
     async def execute_operation(self, page: Page, name: str) -> bool:
         """执行命名维护操作（供「用户脚本」模式调用）。"""
         name = (name or '').strip().lower()
-        if name in ('resume_astrology', 'astro', 'study', '研究星象'):
-            # 复用守卫逻辑：激活星尘药水 III + 恢复研究海密尔
-            try:
-                result = await self.guards(page)
-                return bool(result and not result.get('error'))
-            except Exception as e:
-                log(f'[Adapter] 恢复星象失败: {e}')
+        try:
+            if name in ('resume_astrology', 'astro', 'study', '研究星象'):
+                await self._op_resume_astrology(page)
+            elif name in ('force_save', 'save', '保存'):
+                await self.browser.force_save()
+            elif name in ('township_repair', 'township', '城镇维护'):
+                await self._op_township_repair(page)
+            elif name in ('farming_plant_harvest', 'farming', '农务'):
+                await self._op_farming_plant_harvest(page)
+            elif name in ('bank_buy_slots', 'bankbuy', '买仓库格'):
+                await self._op_bank_buy_slots(page)
+            elif name in ('brew_stardust', 'brew', '制药'):
+                await self._op_brew_stardust(page)
+            elif name in ('combat_probe', 'combat', '战斗'):
+                await self.browser.nav_to(['Combat', '战斗'])
+            else:
+                log(f'[Adapter] 未知操作: {name}')
                 return False
-        if name in ('force_save', 'save', '保存'):
-            return await self.browser.force_save()
-        if name in ('township_repair', 'township', '城镇维护'):
-            await self.browser.nav_to(['Township', '城镇'])
             return True
-        if name in ('farming_plant_harvest', 'farming', '农务'):
-            await self.browser.nav_to(['Farming', '农务'])
-            return True
-        if name in ('combat_probe', 'combat', '战斗'):
-            await self.browser.nav_to(['Combat', '战斗'])
-            return True
-        log(f'[Adapter] 未知操作: {name}')
-        return False
+        except Exception as e:
+            log(f'[Adapter] 操作 {name} 失败: {e}')
+            return False
 
 
 # ------------------------------------------------------------
