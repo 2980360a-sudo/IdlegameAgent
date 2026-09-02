@@ -1,4 +1,4 @@
-﻿# IdleAgent v0.4.0 - adapters/__init__.py
+﻿# IdleAgent v0.5.0 - adapters/__init__.py
 
 from .melvor_idle import MelvorIdleAdapter
 

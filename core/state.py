@@ -1,4 +1,4 @@
-﻿# IdleAgent v0.4.0 - core/state.py
+﻿# IdleAgent v0.5.0 - core/state.py
 # 统一数据模型：所有引擎与适配器共享的 Pydantic 结构
 
 from enum import Enum

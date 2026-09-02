@@ -1,4 +1,4 @@
-﻿# IdleAgent v0.4.0 - core/browser.py
+﻿# IdleAgent v0.5.0 - core/browser.py
 # 通用浏览器自动化封装
 
 import asyncio

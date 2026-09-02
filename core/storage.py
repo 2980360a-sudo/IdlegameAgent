@@ -1,4 +1,4 @@
-﻿# IdleAgent v0.4.0 - core/storage.py
+﻿# IdleAgent v0.5.0 - core/storage.py
 # SQLite 持久化：决策日志 + 状态快照 + 审计记录
 
 import os

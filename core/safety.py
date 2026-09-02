@@ -1,4 +1,4 @@
-﻿# IdleAgent v0.4.0 - core/safety.py
+﻿# IdleAgent v0.5.0 - core/safety.py
 # 弹窗安全系统：危险词 / 交易词 / 损失警告黑名单
 
 import re

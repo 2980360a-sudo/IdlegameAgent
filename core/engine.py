@@ -1,4 +1,4 @@
-﻿# IdleAgent v0.4.0 - core/engine.py
+﻿# IdleAgent v0.5.0 - core/engine.py
 # 四层引擎：诊断 / 规划 / 决策 / 执行
 
 from typing import List, Dict, Any, Optional

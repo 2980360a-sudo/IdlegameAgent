@@ -1,6 +1,6 @@
 ﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# IdleAgent v0.4.0 - scripts/patrol.py
+# IdleAgent v0.5.0 - scripts/patrol.py
 # Melvor Idle 每小时巡检守卫（基于框架适配器，脱敏版）
 #
 # 用法:
@@ -27,11 +27,11 @@ SHOT_DIR = os.environ.get('SHOT_DIR', os.path.join(BASE, 'shots'))
 
 async def run(mode: str = 'inspect') -> int:
     started = ts_now()
-    log(f'===== patrol.py v0.4.0 {mode} 启动 ({started}) =====')
+    log(f'===== patrol.py v0.5.0 {mode} 启动 ({started}) =====')
 
     adapter = MelvorIdleAdapter()
     page = await adapter.browser.launch()
-    result = {'mode': mode, 'started': started, 'agent': 'patrol.py v0.4.0'}
+    result = {'mode': mode, 'started': started, 'agent': 'patrol.py v0.5.0'}
 
     try:
         await adapter.browser.navigate()

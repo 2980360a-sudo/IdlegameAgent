@@ -1,4 +1,4 @@
-﻿# IdleAgent v0.4.0 - core/llm.py
+﻿# IdleAgent v0.5.0 - core/llm.py
 # LLM 客户端：DeepSeek / OpenAI 兼容接口（httpx 实现，无 SDK 依赖）
 
 import os

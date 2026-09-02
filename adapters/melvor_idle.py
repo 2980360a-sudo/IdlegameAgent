@@ -1,5 +1,5 @@
 ﻿"""
-Melvor Idle 适配器 - v0.4.0
+Melvor Idle 适配器 - v0.5.0
 游戏网址: https://melvoridle.com
 实现方式: 优先注入 JS 读取 window.game 对象，失败时回退到 DOM 解析
 """

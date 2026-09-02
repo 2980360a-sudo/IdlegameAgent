@@ -114,6 +114,33 @@ async def main():
     a = Action(action_type=ActionType.WAIT.value, target='body', params={'duration': 5})
     check('Action 构造与序列化', a.model_dump()['action_type'] == 'wait')
 
+    print('\n== 7. 用户认证 ==')
+    from core.auth import UserStore, TokenManager, UserExistsError
+    auth_db = os.path.join(os.path.abspath(_TMP), 'test_auth.db')
+    if os.path.exists(auth_db):
+        os.remove(auth_db)
+    users = UserStore(db_path=auth_db)
+    tokens = TokenManager(secret='smoke-test-secret')
+    u = users.create_user('smokeuser', 'smoke@example.com', 'secret123', display_name='Smoke')
+    check('注册用户', u['username'] == 'smokeuser')
+    check('返回不含密码哈希', 'password_hash' not in u)
+    try:
+        users.create_user('smokeuser', 'x@x.com', 'secret123')
+        check('重复用户名被拒绝', False)
+    except UserExistsError:
+        check('重复用户名被拒绝', True)
+    check('用户名登录', users.verify_credentials('smokeuser', 'secret123') is not None)
+    check('邮箱登录', users.verify_credentials('smoke@example.com', 'secret123') is not None)
+    check('错误密码拒绝', users.verify_credentials('smokeuser', 'bad') is None)
+    tok = tokens.sign({'sub': u['id']})
+    check('token 签发校验', tokens.verify(tok)['sub'] == u['id'])
+    check('token 篡改检测', tokens.verify(tok + 'x') is None)
+    u2 = users.update_user(u['id'], display_name='Smoke2', profile={'note': 'n'})
+    check('更新资料', u2['display_name'] == 'Smoke2')
+    users.close()
+    if os.path.exists(auth_db):
+        os.remove(auth_db)
+
     print(f'\n===== 结果: {passed} 通过, {failed} 失败 =====')
     return 0 if failed == 0 else 1
 

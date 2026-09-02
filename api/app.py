@@ -4,10 +4,10 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 from datetime import datetime
 
-from api.routes import status, rules, logs, control
+from api.routes import status, rules, logs, control, auth
 from api.managers import manager
 
-app = FastAPI(title="IdleAgent API", version="0.4.0")
+app = FastAPI(title="IdleAgent API", version="0.5.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -18,6 +18,7 @@ app.add_middleware(
 )
 
 # 1. REST 路由（必须注册在静态文件挂载之前）
+app.include_router(auth.router, prefix="/api")
 app.include_router(status.router, prefix="/api")
 app.include_router(rules.router, prefix="/api")
 app.include_router(logs.router, prefix="/api")
@@ -26,7 +27,7 @@ app.include_router(control.router, prefix="/api")
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "version": "0.4.0", "timestamp": datetime.now().isoformat()}
+    return {"status": "ok", "version": "0.5.0", "timestamp": datetime.now().isoformat()}
 
 
 # 2. WebSocket 路由（必须在静态文件挂载之前）

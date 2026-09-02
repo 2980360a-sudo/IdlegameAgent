@@ -1,4 +1,4 @@
-﻿# IdleAgent v0.4.0 - core/__init__.py
+﻿# IdleAgent v0.5.0 - core/__init__.py
 
 from .adapter import GameAdapter
 from .state import (
