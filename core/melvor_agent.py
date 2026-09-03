@@ -83,32 +83,43 @@ class MelvorAccountStore:
                 )
                 """
             )
+            # 迁移：为旧库补 inspection_doc / user_feedback 列
+            existing = {r['name'] for r in self._conn.execute('PRAGMA table_info(melvor_accounts)')}
+            if 'inspection_doc' not in existing:
+                self._conn.execute("ALTER TABLE melvor_accounts ADD COLUMN inspection_doc TEXT DEFAULT ''")
+            if 'user_feedback' not in existing:
+                self._conn.execute("ALTER TABLE melvor_accounts ADD COLUMN user_feedback TEXT DEFAULT '[]'")
             self._conn.commit()
 
     def save(self, user_id: int, account: str = None, password: str = None,
-             character_index: int = None, mode: str = None, script: List = None):
+             character_index: int = None, mode: str = None, script: List = None,
+             inspection_doc: str = None, user_feedback: List = None):
         with self._lock:
             row = self._conn.execute(
                 'SELECT * FROM melvor_accounts WHERE user_id = ?', (user_id,)
             ).fetchone()
             if row is None:
                 self._conn.execute(
-                    'INSERT INTO melvor_accounts (user_id, account, password, character_index, mode, script, updated_at) '
-                    'VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    'INSERT INTO melvor_accounts (user_id, account, password, character_index, mode, script, '
+                    'inspection_doc, user_feedback, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
                     (user_id, account, password, character_index, mode,
                      json.dumps(script, ensure_ascii=False) if script is not None else None,
+                     inspection_doc if inspection_doc is not None else '',
+                     json.dumps(user_feedback, ensure_ascii=False) if user_feedback is not None else '[]',
                      time.time()),
                 )
             else:
                 self._conn.execute(
-                    'UPDATE melvor_accounts SET account=?, password=?, character_index=?, mode=?, script=?, updated_at=? '
-                    'WHERE user_id=?',
+                    'UPDATE melvor_accounts SET account=?, password=?, character_index=?, mode=?, script=?, '
+                    'inspection_doc=?, user_feedback=?, updated_at=? WHERE user_id=?',
                     (
                         account if account is not None else row['account'],
                         password if password is not None else row['password'],
                         character_index if character_index is not None else row['character_index'],
                         mode if mode is not None else row['mode'],
                         json.dumps(script, ensure_ascii=False) if script is not None else row['script'],
+                        inspection_doc if inspection_doc is not None else (row['inspection_doc'] if 'inspection_doc' in row.keys() else ''),
+                        json.dumps(user_feedback, ensure_ascii=False) if user_feedback is not None else (row['user_feedback'] if 'user_feedback' in row.keys() else '[]'),
                         time.time(), user_id,
                     ),
                 )
@@ -126,6 +137,11 @@ class MelvorAccountStore:
                 d['script'] = json.loads(d['script']) if d.get('script') else []
             except json.JSONDecodeError:
                 d['script'] = []
+            try:
+                d['user_feedback'] = json.loads(d['user_feedback']) if d.get('user_feedback') else []
+            except json.JSONDecodeError:
+                d['user_feedback'] = []
+            d.setdefault('inspection_doc', '')
             return d
 
     def get_public(self, user_id: int) -> Optional[Dict[str, Any]]:
@@ -141,6 +157,12 @@ class MelvorAccountStore:
         with self._lock:
             self._conn.execute('DELETE FROM melvor_accounts WHERE user_id = ?', (user_id,))
             self._conn.commit()
+
+    def close(self):
+        try:
+            self._conn.close()
+        except Exception:
+            pass
 
 
 # ------------------------------------------------------------
@@ -178,6 +200,7 @@ class MelvorAgentSession:
         self._next_interval: Optional[float] = None  # LLM 建议的下次检查间隔（秒）
         self.inspection_doc: str = ''  # 账号状态检查文档（首次生成，后续增量修改）
         self.user_feedback: List[Dict[str, Any]] = []  # 用户对 LLM 决策的建议 [{time, text}]
+        self.account_store = None  # 由路由注入，用于持久化检查文档/建议
 
         # mock 专用状态
         self._mock_state = self._make_mock_state()
@@ -351,7 +374,20 @@ class MelvorAgentSession:
         if len(self.user_feedback) > 20:
             self.user_feedback = self.user_feedback[-20:]
         self._log_event('user_feedback', 'info', {'text': text})
+        self._persist()
         return self.user_feedback
+
+    def _persist(self):
+        """持久化检查文档与用户建议（若注入了 account_store）。"""
+        try:
+            if self.account_store is not None:
+                self.account_store.save(
+                    self.user_id,
+                    inspection_doc=self.inspection_doc,
+                    user_feedback=self.user_feedback,
+                )
+        except Exception:
+            pass
 
     async def get_status(self) -> Dict[str, Any]:
         state = await self._read_state()
@@ -639,6 +675,7 @@ class MelvorAgentSession:
         doc = data.get('inspection_doc')
         if isinstance(doc, str) and doc.strip():
             self.inspection_doc = doc.strip()
+            self._persist()
         return actions
 
     # ---------- 生存保护 ----------

@@ -22,7 +22,7 @@ USE_REAL_ADAPTER = os.environ.get('USE_REAL_ADAPTER', 'false').lower() == 'true'
 
 
 def _get_session(user_id: int) -> MelvorAgentSession:
-    """惰性创建每用户会话；真实/模拟取决于 USE_REAL_ADAPTER。"""
+    """惰性创建每用户会话；真实/模拟取决于 USE_REAL_ADAPTER；加载持久化的检查文档/建议。"""
     if user_id not in _sessions:
         mock = not USE_REAL_ADAPTER
         adapter = None
@@ -33,9 +33,16 @@ def _get_session(user_id: int) -> MelvorAgentSession:
             except Exception as e:
                 print(f'[Melvor] 适配器初始化失败: {e}')
         llm = LLMClient() if LLMClient().configured else None
-        _sessions[user_id] = MelvorAgentSession(
+        session = MelvorAgentSession(
             user_id, adapter=adapter, llm=llm, storage=storage, mock=mock,
         )
+        session.account_store = account_store
+        # 加载持久化的检查文档与用户建议
+        saved = account_store.get(user_id)
+        if saved:
+            session.inspection_doc = saved.get('inspection_doc') or ''
+            session.user_feedback = saved.get('user_feedback') or []
+        _sessions[user_id] = session
     return _sessions[user_id]
 
 

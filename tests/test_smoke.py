@@ -258,6 +258,27 @@ async def main():
     check('prompt 含用户建议', '【用户建议】' in p and '优先练钓鱼' in p)
     check('prompt 含 inspection_doc 输出指示', 'inspection_doc' in p)
 
+    print('\n== 13. 检查文档持久化 ==')
+    from core.melvor_agent import MelvorAccountStore
+    acc_db = os.path.join(os.path.abspath(_TMP), 'test_melvor_acc.db')
+    if os.path.exists(acc_db):
+        os.remove(acc_db)
+    acc_store = MelvorAccountStore(db_path=acc_db)
+    acc_store.save(99, account='acct', password='pw', inspection_doc='### 检查文档\n- 阶段1', user_feedback=[{'time': 1, 'text': '练钓鱼'}])
+    got = acc_store.get(99)
+    check('检查文档持久化', got.get('inspection_doc') == '### 检查文档\n- 阶段1')
+    check('用户建议持久化', got.get('user_feedback') == [{'time': 1, 'text': '练钓鱼'}])
+    # 会话 _persist 走 account_store
+    s5 = MelvorAgentSession(99, mock=True)
+    s5.account_store = acc_store
+    s5.inspection_doc = '更新后的文档'
+    s5._persist()
+    check('会话 _persist 落库', acc_store.get(99).get('inspection_doc') == '更新后的文档')
+    acc_store.delete(99)
+    acc_store.close()
+    if os.path.exists(acc_db):
+        os.remove(acc_db)
+
     print(f'\n===== 结果: {passed} 通过, {failed} 失败 =====')
     return 0 if failed == 0 else 1
 
