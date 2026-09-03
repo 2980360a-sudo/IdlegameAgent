@@ -311,6 +311,8 @@ border-left:3px solid var(--border-color);font-size:13px}
 .patrol-row input{flex:1}
 .checkbox-row{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text-secondary)}
 .checkbox-row input{width:16px;height:16px;cursor:pointer}
+.inspection-doc{font-size:13px;line-height:1.7;color:var(--text-secondary);white-space:pre-wrap;word-break:break-word}
+.mt{margin-top:10px}
 
 /* ============ 响应式 ============ */
 @media(max-width:900px){

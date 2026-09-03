@@ -54,6 +54,7 @@
         melvorStart: function (p) { return API.request('POST', '/melvor/start', p); },
         melvorStop: function () { return API.request('POST', '/melvor/stop'); },
         melvorPatrol: function (p) { return API.request('POST', '/melvor/patrol', p); },
+        melvorFeedback: function (p) { return API.request('POST', '/melvor/feedback', p); },
         melvorDisconnect: function () { return API.request('POST', '/melvor/disconnect'); },
         melvorStatus: function () { return API.request('GET', '/melvor/status'); },
         melvorEvents: function () { return API.request('GET', '/melvor/events'); },
@@ -436,7 +437,17 @@
             '    <div class="panel"><div class="panel-header"><span class="panel-title">⑤ 攻略知识库 · 动作目录（RAG 方针）</span></div>' +
             '      <div class="panel-body" id="mv-guides"><div class="empty">加载中...</div></div>' +
             '    </div>' +
-            '    <div class="panel"><div class="panel-header"><span class="panel-title">⑥ 事件与决策日志</span></div>' +
+            '    <div class="panel"><div class="panel-header"><span class="panel-title">⑥ 账号检查文档</span></div>' +
+            '      <div class="panel-body" id="mv-inspection"><div class="empty">首次 LLM 决策后自动生成</div></div>' +
+            '    </div>' +
+            '    <div class="panel"><div class="panel-header"><span class="panel-title">⑦ 建议对话框</span></div>' +
+            '      <div class="panel-body">' +
+            '        <textarea id="mv-feedback-input" class="form-input" rows="2" placeholder="对 LLM 的决策提出建议，例如：优先练钓鱼而非星象..."></textarea>' +
+            '        <button class="btn btn-primary btn-sm mt" id="mv-feedback-btn">提交建议</button>' +
+            '        <ul id="mv-feedback-list" class="log-list mt"></ul>' +
+            '      </div>' +
+            '    </div>' +
+            '    <div class="panel"><div class="panel-header"><span class="panel-title">⑧ 事件与决策日志</span></div>' +
             '      <div class="panel-body log-two-col">' +
             '        <div><h4 class="form-section-title">事件</h4><ul id="mv-events" class="log-list"></ul></div>' +
             '        <div><h4 class="form-section-title">决策</h4><ul id="mv-decisions" class="log-list"></ul></div>' +
@@ -576,6 +587,26 @@
         if (intEl && intEl !== document.activeElement) intEl.value = s.patrol_interval != null ? s.patrol_interval : '';
         var cb = $('#mv-llm-schedules');
         if (cb) cb.checked = !!s.llm_schedules;
+        // 检查文档
+        var insp = $('#mv-inspection');
+        if (insp) {
+            var doc = s.inspection_doc || '';
+            insp.innerHTML = doc
+                ? '<div class="inspection-doc">' + escapeHtml(doc).replace(/\n/g, '<br>') + '</div>'
+                : '<div class="empty">首次 LLM 决策后自动生成</div>';
+        }
+        // 建议列表
+        var fbList = $('#mv-feedback-list');
+        if (fbList) {
+            var fbs = s.user_feedback || [];
+            fbList.innerHTML = fbs.length
+                ? fbs.slice().reverse().map(function (f) {
+                    return '<li class="log-item decision"><span class="log-time">' +
+                        new Date(f.time * 1000).toLocaleTimeString() + '</span>' +
+                        '<div class="log-content">' + escapeHtml(f.text) + '</div></li>';
+                }).join('')
+                : '<li class="empty">暂无建议</li>';
+        }
     }
 
     function fmtNum(v) {
@@ -774,6 +805,18 @@
             API.melvorPatrol({ llm_schedules: on }).then(function () {
                 toast(on ? '已开启：LLM 自主决定下次检查' : '已关闭：使用固定巡检间隔');
             }).catch(function (err) { toast(err.message, true); });
+        });
+
+        $('#mv-feedback-btn').addEventListener('click', function () {
+            var text = $('#mv-feedback-input').value.trim();
+            if (!text) { toast('请输入建议内容', true); return; }
+            var btn = this; btn.disabled = true;
+            API.melvorFeedback({ text: text }).then(function () {
+                $('#mv-feedback-input').value = '';
+                toast('建议已提交，将在下次 LLM 决策时参考');
+                refreshMelvor();
+            }).catch(function (err) { toast(err.message, true); })
+              .finally(function () { btn.disabled = false; });
         });
     }
 

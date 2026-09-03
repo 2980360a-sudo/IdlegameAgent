@@ -244,6 +244,20 @@ async def main():
     check('status 含 llm_schedules', st.get('llm_schedules') is True)
     check('status 含 llm 字段', 'llm' in st and 'usage' in st.get('llm', {}))
 
+    print('\n== 12. 账号检查文档 + 用户建议 ==')
+    # 用户建议
+    fb = s4.submit_feedback('优先练钓鱼而非星象')
+    check('提交建议成功', len(fb) == 1 and fb[0]['text'] == '优先练钓鱼而非星象')
+    check('status 含 user_feedback', st.get('user_feedback') is not None)
+    # 检查文档解析
+    s4._parse_actions('{"inspection_doc": "### 检查文档\\n- 阶段1", "actions": []}')
+    check('解析 inspection_doc', s4.inspection_doc.startswith('### 检查文档'))
+    # prompt 含文档 + 建议
+    p = s4._build_llm_prompt(s4._mock_state, 'efficiency')
+    check('prompt 含上次检查文档', '【上次检查文档】' in p)
+    check('prompt 含用户建议', '【用户建议】' in p and '优先练钓鱼' in p)
+    check('prompt 含 inspection_doc 输出指示', 'inspection_doc' in p)
+
     print(f'\n===== 结果: {passed} 通过, {failed} 失败 =====')
     return 0 if failed == 0 else 1
 

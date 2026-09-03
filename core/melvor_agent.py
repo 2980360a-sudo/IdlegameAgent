@@ -176,6 +176,8 @@ class MelvorAgentSession:
         self.patrol_interval: float = float(os.environ.get('MELVOR_LOOP_INTERVAL', '3600'))
         self.llm_schedules: bool = False  # 是否让 LLM 决定下次检查时间
         self._next_interval: Optional[float] = None  # LLM 建议的下次检查间隔（秒）
+        self.inspection_doc: str = ''  # 账号状态检查文档（首次生成，后续增量修改）
+        self.user_feedback: List[Dict[str, Any]] = []  # 用户对 LLM 决策的建议 [{time, text}]
 
         # mock 专用状态
         self._mock_state = self._make_mock_state()
@@ -340,6 +342,17 @@ class MelvorAgentSession:
         self.llm_schedules = bool(enabled)
         return self.llm_schedules
 
+    def submit_feedback(self, text: str) -> List[Dict[str, Any]]:
+        """记录用户对 LLM 决策的建议（注入后续决策 prompt）。"""
+        text = (text or '').strip()
+        if not text:
+            return self.user_feedback
+        self.user_feedback.append({'time': time.time(), 'text': text})
+        if len(self.user_feedback) > 20:
+            self.user_feedback = self.user_feedback[-20:]
+        self._log_event('user_feedback', 'info', {'text': text})
+        return self.user_feedback
+
     async def get_status(self) -> Dict[str, Any]:
         state = await self._read_state()
         return {
@@ -352,6 +365,8 @@ class MelvorAgentSession:
             'script': self._script,
             'patrol_interval': self.patrol_interval,
             'llm_schedules': self.llm_schedules,
+            'inspection_doc': self.inspection_doc,
+            'user_feedback': self.user_feedback,
             'llm': {
                 'configured': bool(self.llm and self.llm.configured),
                 'model': self.llm.model if self.llm else '',
@@ -538,6 +553,12 @@ class MelvorAgentSession:
         policy = get_policy(state)
         policy_block = policy or '（暂无攻略知识库）'
         catalog_text = format_action_catalog(self._action_catalog) or '（无动作目录）'
+        doc_block = f'【上次检查文档】\n{self.inspection_doc}\n\n' if self.inspection_doc else ''
+        feedback_block = ''
+        if self.user_feedback:
+            fb_lines = '\n'.join(f'- {f["text"]}' for f in self.user_feedback[-8:])
+            feedback_block = f'【用户建议】（用户对决策的反馈，请优先考虑）\n{fb_lines}\n\n'
+        first_check_hint = '（首次检查：请完整生成账号状态检查文档）' if not self.inspection_doc else '（后续检查：基于上次文档修改变化部分，保持结构）'
 
         return (
             '你是 Melvor Idle 挂机决策助手。你的职责是：\n'
@@ -562,19 +583,21 @@ class MelvorAgentSession:
             f'- 技能: {skills}\n\n'
             f'【动作目录】（可执行的动作空间，格式：动作名(需求等级)）\n{catalog_text}\n\n'
             f'【维护操作】\n{ops}\n\n'
+            f'{doc_block}{feedback_block}'
             '输出要求：\n'
             '- reason 字段说明：当前处于攻略哪个阶段 + 为什么做这个动作；\n'
             '- 训练某技能用 action_type="skill"，target="技能Key:动作名"（技能Key/动作名以【动作目录】为准）；\n'
             '- 战斗用 action_type="combat"，target 取 "area:区域名" / "dungeon:地牢名" / "slayer:屠杀区域名"（以【动作目录】为准）；\n'
             '- 城镇/农务/买仓库/保存等维护用 action_type="operation"，target 用【维护操作】里的名字；\n'
             '- 只输出当前应做的 1-3 个动作；若已满足攻略当前阶段目标，输出 {"actions": []}；\n'
+            f'- 额外输出 inspection_doc 字段（Markdown 字符串）：账号状态检查文档{first_check_hint}。内容含：①账号概览 ②所处攻略阶段 ③上次动作结果 ④下一步建议，300 字内；\n'
             + (
                 '- 额外输出 next_check_in 字段（秒）：建议下次上线检查的间隔。依据当前动作的完成时间估计'
                 '（如农务作物生长、技能训练到目标等级、药水耗尽、食物/仓库将满等），不超过 86400 秒（24 小时，游戏离线挂机上限）。\n'
                 if self.llm_schedules else ''
             ) +
-            '- 严格输出 JSON，动作可混用：\n'
-            '{"actions": [{"action_type": "skill", "target": "Woodcutting:NormalTree", "reason": "..."}'
+            '- 严格输出 JSON：\n'
+            '{"inspection_doc": "...", "actions": [{"action_type": "skill", "target": "Woodcutting:NormalTree", "reason": "..."}'
             + (', "next_check_in": 1800' if self.llm_schedules else '') + ']}'
         )
 
@@ -612,6 +635,10 @@ class MelvorAgentSession:
                     self._next_interval = min(PATROL_INTERVAL_MAX, max(PATROL_INTERVAL_MIN, nci))
             except (TypeError, ValueError):
                 pass
+        # 账号检查文档：解析 inspection_doc，非空则覆盖保存
+        doc = data.get('inspection_doc')
+        if isinstance(doc, str) and doc.strip():
+            self.inspection_doc = doc.strip()
         return actions
 
     # ---------- 生存保护 ----------

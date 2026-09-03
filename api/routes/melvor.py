@@ -65,6 +65,10 @@ class PatrolRequest(BaseModel):
     llm_schedules: Optional[bool] = Field(None, description='是否让 LLM 决定下次检查时间')
 
 
+class FeedbackRequest(BaseModel):
+    text: str = Field(..., description='用户对 LLM 决策的建议')
+
+
 # ------------------------------------------------------------
 # 路由
 # ------------------------------------------------------------
@@ -211,6 +215,14 @@ async def set_patrol_interval(req: PatrolRequest, user: dict = Depends(get_curre
     if req.llm_schedules is not None:
         out['llm_schedules'] = session.set_llm_schedules(req.llm_schedules)
     return out
+
+
+@router.post('/melvor/feedback')
+async def submit_feedback(req: FeedbackRequest, user: dict = Depends(get_current_user)):
+    """用户对 LLM 决策提出建议（注入后续决策 prompt）。"""
+    session = _get_session(user['id'])
+    feedback = session.submit_feedback(req.text)
+    return {'ok': True, 'feedback': feedback}
 
 
 @router.post('/melvor/disconnect')

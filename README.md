@@ -1,8 +1,8 @@
-# IdleAgent v0.8.1 🎮🤖
+# IdleAgent v0.8.2 🎮🤖
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/Version-0.8.1-green.svg)]()
+[![Version](https://img.shields.io/badge/Version-0.8.2-green.svg)]()
 [![Status](https://img.shields.io/badge/Status-Beta-orange.svg)]()
 
 一个基于 LLM 的通用挂机游戏（Idle/Incremental Games）自动化决策 Agent 框架。支持多游戏接入、可配置决策规则、可审计决策日志与持续策略学习。
@@ -13,14 +13,15 @@
 
 ## 版本信息
 
-- **当前版本**: v0.8.1
+- **当前版本**: v0.8.2
 - **发布日期**: 2026-09-03
-- **更新内容**: 巡检间隔默认改为 1 小时，上限 24 小时（游戏离线挂机累计上限）；新增「LLM 自主决定下次检查时间」选项
+- **更新内容**: 账号检查文档（首次生成 + 后续增量修改）+ 用户建议对话框（建议注入 LLM 决策）
 
 ### 版本历史
 
 | 版本 | 日期 | 更新内容 |
 |------|------|---------|
+| v0.8.2 | 2026-09-03 | 新增账号检查文档（LLM 首次检查生成完整文档，后续基于上一版修改变化部分）；新增用户建议对话框（`/melvor/feedback`，建议注入后续决策 prompt）；仪表盘新增「检查文档」+「建议对话框」面板 |
 | v0.8.1 | 2026-09-03 | 巡检间隔默认 3600 秒（1 小时），钳制到 [5s, 24h]；新增 `llm_schedules` 选项让 LLM 输出 `next_check_in` 自主排程下次检查时间；`/melvor/patrol` 支持 interval + llm_schedules 双参数；仪表盘监控面板加开关 |
 | v0.8.0 | 2026-09-03 | 攻略知识库扩到 4 篇（新增 money_making.md 官方赚钱策略表）；`core/guide.py` 新增 `list_guide_meta()`；新增 `/api/melvor/guides` 端点返回攻略元信息 + 动作目录摘要；仪表盘新增「攻略知识库 · 动作目录」面板 |
 | v0.7.1 | 2026-09-03 | 补全动作执行：新增 `execute_combat_action`（area/dungeon/slayer 三路）；`execute_skill_action` 分派表补全采矿/钓鱼/烹饪/扒窃/灵巧；LLM 新增 `combat` 动作类型 + 生存模式死亡风险拦截 |
