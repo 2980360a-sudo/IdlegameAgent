@@ -47,6 +47,7 @@
         melvorModes: function () { return API.request('GET', '/melvor/modes'); },
         melvorConfig: function () { return API.request('GET', '/melvor/config'); },
         melvorLogin: function (p) { return API.request('POST', '/melvor/login', p); },
+        melvorAutoLogin: function () { return API.request('POST', '/melvor/auto_login'); },
         melvorCharacters: function () { return API.request('GET', '/melvor/characters'); },
         melvorSelect: function (p) { return API.request('POST', '/melvor/select', p); },
         melvorStart: function (p) { return API.request('POST', '/melvor/start', p); },
@@ -459,7 +460,24 @@
             if (c.character_index != null) {
                 $('#mv-session').textContent = '已选角色 #' + c.character_index;
             }
+            // 已保存云账号密码 → 自动登录（本地版无需每次输入密码）
+            if (c.has_password && c.account) {
+                autoLoginMelvor();
+            }
         }).catch(function () {});
+    }
+
+    function autoLoginMelvor() {
+        API.melvorAutoLogin().then(function (data) {
+            toast('已用保存的云账号自动登录');
+            var chars = data.characters || [];
+            var sel = $('#mv-char-select');
+            sel.innerHTML = chars.map(function (cc, i) { return '<option value="' + i + '">' + escapeHtml(cc.label || ('角色 ' + i)) + '</option>'; }).join('');
+            $('#mv-characters').classList.remove('hidden');
+            refreshMelvor();
+        }).catch(function (err) {
+            toast('自动登录失败：' + err.message, true);
+        });
     }
 
     function defaultManualScript() {
@@ -667,17 +685,14 @@
         bindAuthForms();
         bindShell();
 
-        if (AppState.token) {
-            API.me().then(function (data) {
-                AppState.user = data.user;
-                showApp();
-            }).catch(function () {
-                clearAuth();
-                showAuth();
-            });
-        } else {
+        // 无 token 也尝试 me()：本地版（DISABLE_AUTH）会返回本地用户，云端版会 401 走登录
+        API.me().then(function (data) {
+            AppState.user = data.user;
+            showApp();
+        }).catch(function () {
+            clearAuth();
             showAuth();
-        }
+        });
     }
 
     document.addEventListener('DOMContentLoaded', initApp);

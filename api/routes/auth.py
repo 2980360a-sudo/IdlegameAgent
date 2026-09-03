@@ -1,4 +1,5 @@
 """用户认证路由：注册 / 登录 / 登出 / 我的信息 / 更新资料。"""
+import os
 from typing import Optional, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,6 +13,13 @@ router = APIRouter()
 user_store = UserStore()
 token_manager = TokenManager()
 _bearer = HTTPBearer(auto_error=False)
+
+# 本地版关闭认证：无需注册/登录，直接以「本地用户」身份使用（用户数据存 user_id=1）
+DISABLE_AUTH = os.environ.get('DISABLE_AUTH', 'false').lower() == 'true'
+LOCAL_USER = {
+    'id': 1, 'username': 'local', 'display_name': '本地用户',
+    'email': None, 'profile': {}, 'created_at': 0,
+}
 
 
 # ------------------------------------------------------------
@@ -42,6 +50,8 @@ class UpdateProfileRequest(BaseModel):
 async def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
 ) -> Dict[str, Any]:
+    if DISABLE_AUTH:
+        return dict(LOCAL_USER)
     if credentials is None:
         raise HTTPException(status_code=401, detail='未登录')
     payload = token_manager.verify(credentials.credentials)

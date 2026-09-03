@@ -113,10 +113,11 @@ class MelvorAccountStore:
             return d
 
     def get_public(self, user_id: int) -> Optional[Dict[str, Any]]:
-        """返回脱敏配置（不含密码）。"""
+        """返回脱敏配置（不含密码），并标记是否已保存密码。"""
         d = self.get(user_id)
         if d is None:
             return None
+        d['has_password'] = bool(d.get('password'))
         d.pop('password', None)
         return d
 

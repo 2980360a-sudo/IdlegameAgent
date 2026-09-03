@@ -88,6 +88,19 @@ async def melvor_login(req: LoginRequest, user: dict = Depends(get_current_user)
     return result
 
 
+@router.post('/melvor/auto_login')
+async def melvor_auto_login(user: dict = Depends(get_current_user)):
+    """用已持久化的云账号自动登录（无需重新输入密码）。"""
+    saved = account_store.get(user['id'])
+    if not saved or not saved.get('account') or not saved.get('password'):
+        return {'ok': False, 'error': '未保存云账号'}
+    session = _get_session(user['id'])
+    result = await session.login(saved['account'], saved['password'])
+    if not result.get('ok'):
+        raise HTTPException(status_code=400, detail=result.get('error', '自动登录失败'))
+    return result
+
+
 @router.get('/melvor/characters')
 async def list_characters(user: dict = Depends(get_current_user)):
     session = _get_session(user['id'])
