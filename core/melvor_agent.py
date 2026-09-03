@@ -201,6 +201,7 @@ class MelvorAgentSession:
         self.inspection_doc: str = ''  # 账号状态检查文档（首次生成，后续增量修改）
         self.user_feedback: List[Dict[str, Any]] = []  # 用户对 LLM 决策的建议 [{time, text}]
         self.account_store = None  # 由路由注入，用于持久化检查文档/建议
+        self._next_patrol_at: Optional[float] = None  # 下次巡检时间戳（仪表盘倒计时用）
 
         # mock 专用状态
         self._mock_state = self._make_mock_state()
@@ -333,6 +334,7 @@ class MelvorAgentSession:
             self._loop_task = None
         if self.session_state != 'idle':
             self.session_state = 'connected'
+        self._next_patrol_at = None
         self._log_event('stop', 'info', {})
         return {'ok': True}
 
@@ -403,6 +405,7 @@ class MelvorAgentSession:
             'llm_schedules': self.llm_schedules,
             'inspection_doc': self.inspection_doc,
             'user_feedback': self.user_feedback,
+            'next_patrol_at': self._next_patrol_at,
             'llm': {
                 'configured': bool(self.llm and self.llm.configured),
                 'model': self.llm.model if self.llm else '',
@@ -433,6 +436,7 @@ class MelvorAgentSession:
     async def _loop(self):
         while self.session_state == 'running':
             interval = self.patrol_interval
+            self._next_patrol_at = None  # 正在巡检中（无倒计时）
             try:
                 state = await self._read_state()
                 if state is not None:
@@ -458,6 +462,7 @@ class MelvorAgentSession:
                 self._log_event('loop_error', 'error', {'error': str(e)})
             finally:
                 self._next_interval = None
+            self._next_patrol_at = time.time() + interval  # 记录下次巡检时间点，供仪表盘倒计时
             await asyncio.sleep(interval)
 
     async def _execute(self, action: Action) -> bool:

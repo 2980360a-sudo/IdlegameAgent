@@ -242,6 +242,7 @@ async def main():
     st = await s4.get_status()
     check('status 含 patrol_interval', 'patrol_interval' in st)
     check('status 含 llm_schedules', st.get('llm_schedules') is True)
+    check('status 含 next_patrol_at', 'next_patrol_at' in st)
     check('status 含 llm 字段', 'llm' in st and 'usage' in st.get('llm', {}))
 
     print('\n== 12. 账号检查文档 + 用户建议 ==')

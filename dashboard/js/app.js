@@ -11,7 +11,8 @@
     var AppState = {
         token: localStorage.getItem('idleagent_token') || '',
         user: null,
-        currentPage: 'dashboard'
+        currentPage: 'dashboard',
+        nextPatrolAt: null
     };
 
     // ============================================================
@@ -375,9 +376,11 @@
     // 梅尔沃放置
     // ============================================================
     var melvorPollTimer = null;
+    var patrolCountdownTimer = null;
 
     function clearMelvorPoll() {
         if (melvorPollTimer) { clearInterval(melvorPollTimer); melvorPollTimer = null; }
+        if (patrolCountdownTimer) { clearInterval(patrolCountdownTimer); patrolCountdownTimer = null; }
     }
 
     function renderMelvor() {
@@ -419,6 +422,7 @@
             '        <div class="monitor-row"><span class="monitor-label">📥 Prompt tokens</span><span class="monitor-value" id="mv-llm-prompt">0</span></div>' +
             '        <div class="monitor-row"><span class="monitor-label">📤 Completion tokens</span><span class="monitor-value" id="mv-llm-completion">0</span></div>' +
             '        <div class="monitor-row"><span class="monitor-label">Σ 总 tokens</span><span class="monitor-value" id="mv-llm-total">0</span></div>' +
+            '        <div class="monitor-row"><span class="monitor-label">⏱ 下次巡检</span><span class="monitor-value" id="mv-next-patrol">-</span></div>' +
             '        <hr class="divider">' +
             '        <div class="form-group"><label>巡检间隔（秒，默认 3600=1小时，上限 86400=24小时）</label>' +
             '          <div class="patrol-row"><input type="number" id="mv-patrol-interval" class="form-input" min="5" max="86400" step="1">' +
@@ -462,6 +466,7 @@
         bindMelvor();
         refreshMelvor();
         melvorPollTimer = setInterval(refreshMelvor, 5000);
+        patrolCountdownTimer = setInterval(updatePatrolCountdown, 1000);
     }
 
     function loadMelvorModes() {
@@ -587,6 +592,9 @@
         if (intEl && intEl !== document.activeElement) intEl.value = s.patrol_interval != null ? s.patrol_interval : '';
         var cb = $('#mv-llm-schedules');
         if (cb) cb.checked = !!s.llm_schedules;
+        // 下次巡检倒计时
+        AppState.nextPatrolAt = s.next_patrol_at != null ? Number(s.next_patrol_at) : null;
+        updatePatrolCountdown();
         // 检查文档
         var insp = $('#mv-inspection');
         if (insp) {
@@ -615,6 +623,26 @@
         if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
         if (n >= 1e4) return (n / 1e3).toFixed(1) + 'K';
         return n.toFixed(0);
+    }
+
+    function updatePatrolCountdown() {
+        var el = $('#mv-next-patrol');
+        if (!el) return;
+        var at = AppState.nextPatrolAt;
+        if (at == null) {
+            el.textContent = '—';
+            return;
+        }
+        var remain = Math.floor(at - Date.now() / 1000);
+        if (remain <= 0) {
+            el.textContent = '巡检中…';
+            return;
+        }
+        var h = Math.floor(remain / 3600);
+        var m = Math.floor((remain % 3600) / 60);
+        var s = Math.floor(remain % 60);
+        var pad = function (x) { return (x < 10 ? '0' : '') + x; };
+        el.textContent = (h > 0 ? h + ':' + pad(m) + ':' : '') + pad(m) + ':' + pad(s);
     }
 
     function sessionText(s) {
