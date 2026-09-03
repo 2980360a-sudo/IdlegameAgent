@@ -1,8 +1,8 @@
-# IdleAgent v0.8.2 🎮🤖
+# IdleAgent v0.9.0 🎮🤖
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/Version-0.8.2-green.svg)]()
+[![Version](https://img.shields.io/badge/Version-0.9.0-green.svg)]()
 [![Status](https://img.shields.io/badge/Status-Beta-orange.svg)]()
 
 一个基于 LLM 的通用挂机游戏（Idle/Incremental Games）自动化决策 Agent 框架。支持多游戏接入、可配置决策规则、可审计决策日志与持续策略学习。
@@ -13,25 +13,25 @@
 
 ## 版本信息
 
-- **当前版本**: v0.8.2
-- **发布日期**: 2026-09-03
-- **更新内容**: 账号检查文档（首次生成 + 后续增量修改）+ 用户建议对话框（建议注入 LLM 决策）
+- **当前版本**: v0.9.0
+- **更新内容**: 信息架构重构——新增「系统设置」页（模型 API 配置可读写并热更新）、「决策日志」页（级别筛选）、重做仪表盘页展示真实挂机数据；UI 精致化（状态指示点/进度条/彩色统计卡）
 
 ### 版本历史
 
-| 版本 | 日期 | 更新内容 |
-|------|------|---------|
-| v0.8.2 | 2026-09-03 | 新增账号检查文档（LLM 首次检查生成完整文档，后续基于上一版修改变化部分）；新增用户建议对话框（`/melvor/feedback`，建议注入后续决策 prompt）；仪表盘新增「检查文档」+「建议对话框」面板 |
-| v0.8.1 | 2026-09-03 | 巡检间隔默认 3600 秒（1 小时），钳制到 [5s, 24h]；新增 `llm_schedules` 选项让 LLM 输出 `next_check_in` 自主排程下次检查时间；`/melvor/patrol` 支持 interval + llm_schedules 双参数；仪表盘监控面板加开关 |
-| v0.8.0 | 2026-09-03 | 攻略知识库扩到 4 篇（新增 money_making.md 官方赚钱策略表）；`core/guide.py` 新增 `list_guide_meta()`；新增 `/api/melvor/guides` 端点返回攻略元信息 + 动作目录摘要；仪表盘新增「攻略知识库 · 动作目录」面板 |
-| v0.7.1 | 2026-09-03 | 补全动作执行：新增 `execute_combat_action`（area/dungeon/slayer 三路）；`execute_skill_action` 分派表补全采矿/钓鱼/烹饪/扒窃/灵巧；LLM 新增 `combat` 动作类型 + 生存模式死亡风险拦截 |
-| v0.7.0 | 2026-09-03 | 攻略方针驱动的 LLM 决策：新增 `guides/` 攻略知识库（训练顺序方针）+ `core/guide.py` 检索模块；新增动态动作目录 `probe_action_catalog`（枚举全部技能动作/战斗区域/地牢/屠杀区域）+ 通用技能执行器 `execute_skill_action`；LLM 依据攻略判断当前阶段并选动作，不再硬编码 7 操作 |
-| v0.6.0 | 2026-09-03 | 新增 Melvor 挂机 Agent：云账号登录 + 角色选择 + 角色数据抓取展示；LLM 决策 + 三种运行模式（效率/不死亡/用户脚本）；事件与决策日志追踪（`core/melvor_agent.py` + `/api/melvor/*`） |
-| v0.5.0 | 2026-09-03 | 新增用户认证（注册/登录/资料，`core/auth.py` + `/api/auth/*`）；前端重构为登录/注册 + 仪表盘 + 个人资料 |
-| v0.4.0 | 2026-09-03 | 完成「真实适配器接入引擎」「LLM 决策（DeepSeek）」「SQLite 持久化」；修复适配器/数据模型不一致、`/health` 被静态挂载遮蔽、损坏的 `__init__.py` 与 `melvor.py`；新增 `core/llm.py`、`core/storage.py`、`tests/test_smoke.py` |
-| v0.3.0 | 2026-09-02 | 修复 `browser.py`/`main.py` 换行问题；API 服务可用；WebSocket 心跳正常；前端联调通过 |
-| v0.2.0 | 2026-09-01 | 通用框架重构、MelvorIdleAdapter、脱敏、Web 控制台、YAML 规则配置、FastAPI 后端骨架 |
-| v0.1.0 | 2026-08 | Melvor Idle 单游戏脚本原型（72h 零人工干预验证） |
+| 版本 | 更新内容 |
+|------|---------|
+| v0.9.0 | 信息架构重构：新增系统设置页（模型 API 配置）、决策日志页（级别筛选）、重做仪表盘页；UI 精致化（状态点/进度条/徽章/选中态） |
+| v0.8.2 | 新增账号检查文档（首次生成 + 后续增量修改）；用户建议对话框（建议注入决策 prompt）；检查文档持久化 |
+| v0.8.1 | 巡检间隔默认 1 小时、上限 24 小时；LLM 自主排程（`next_check_in`）；运行监控 token/巡检间隔面板 |
+| v0.8.0 | 攻略知识库扩到 4 篇；`/api/melvor/guides` 端点；仪表盘「攻略知识库 · 动作目录」面板 |
+| v0.7.1 | 战斗执行 `execute_combat_action`（area/dungeon/slayer）；技能执行分派补全；`combat` 动作类型 |
+| v0.7.0 | 攻略方针驱动的 RAG 决策：攻略知识库 + 动态动作目录 + 通用技能执行器，取代硬编码 7 操作 |
+| v0.6.0 | 新增 Melvor 挂机 Agent：云账号登录 + 角色选择 + 数据抓取 + 三种运行模式 + 事件/决策日志 |
+| v0.5.0 | 新增用户认证（注册/登录/资料）；前端重构为登录/注册 + 仪表盘 + 个人资料 |
+| v0.4.0 | 真实适配器接入引擎、LLM 决策（DeepSeek）、SQLite 持久化 |
+| v0.3.0 | 修复 browser/main 换行；API 服务可用；WebSocket 心跳；前端联调通过 |
+| v0.2.0 | 通用框架重构、MelvorIdleAdapter、脱敏、Web 控制台、YAML 规则配置、FastAPI 后端骨架 |
+| v0.1.0 | Melvor Idle 单游戏脚本原型（72h 零人工干预验证） |
 
 ---
 
@@ -398,10 +398,8 @@ class MyGameAdapter(GameAdapter):
 
 **孙屿航 (Eric Sun)**
 
-- 从传统制造业 PM 转型 AI 产品经理
 - 独立主导 AI 知识库（RAGFlow + DeepSeek）从 0 到 1 落地
 - 独立设计并运行 Melvor Idle 全自动决策 Agent（72h 零干预验证）
-- 求职意向：AI 产品经理 / AI 项目经理
 
 ## 许可证
 
