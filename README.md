@@ -1,8 +1,8 @@
-# IdleAgent v0.6.0 🎮🤖
+# IdleAgent v0.7.0 🎮🤖
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/Version-0.6.0-green.svg)]()
+[![Version](https://img.shields.io/badge/Version-0.7.0-green.svg)]()
 [![Status](https://img.shields.io/badge/Status-Beta-orange.svg)]()
 
 一个基于 LLM 的通用挂机游戏（Idle/Incremental Games）自动化决策 Agent 框架。支持多游戏接入、可配置决策规则、可审计决策日志与持续策略学习。
@@ -13,14 +13,15 @@
 
 ## 版本信息
 
-- **当前版本**: v0.6.0
+- **当前版本**: v0.7.0
 - **发布日期**: 2026-09-03
-- **更新内容**: 新增 Melvor 挂机 Agent（仪表盘内登录云账号、选择角色、抓取角色数据展示）；接入 LLM 并实现三种运行模式（最高效率 / 极限不死亡 / 用户脚本）；追踪账号事件与决策日志
+- **更新内容**: LLM 决策从「7 个硬编码操作」升级为「攻略方针驱动的 RAG 决策」——枚举全量动态动作目录（全部技能/战斗区域/地牢），以官方 Wiki + 社区攻略为方针判断当下最优动作
 
 ### 版本历史
 
 | 版本 | 日期 | 更新内容 |
 |------|------|---------|
+| v0.7.0 | 2026-09-03 | 攻略方针驱动的 LLM 决策：新增 `guides/` 攻略知识库（训练顺序方针）+ `core/guide.py` 检索模块；新增动态动作目录 `probe_action_catalog`（枚举全部技能动作/战斗区域/地牢/屠杀区域）+ 通用技能执行器 `execute_skill_action`（selectTree/selectRecipeOnClick/studyConstellationOnClick…）；LLM 依据攻略判断当前阶段并选动作，不再硬编码 7 操作 |
 | v0.6.0 | 2026-09-03 | 新增 Melvor 挂机 Agent：云账号登录 + 角色选择 + 角色数据抓取展示；LLM 决策 + 三种运行模式（效率/不死亡/用户脚本）；事件与决策日志追踪（`core/melvor_agent.py` + `/api/melvor/*`） |
 | v0.5.0 | 2026-09-03 | 新增用户认证（注册/登录/资料，`core/auth.py` + `/api/auth/*`）；前端重构为登录/注册 + 仪表盘 + 个人资料 |
 | v0.4.0 | 2026-09-03 | 完成「真实适配器接入引擎」「LLM 决策（DeepSeek）」「SQLite 持久化」；修复适配器/数据模型不一致、`/health` 被静态挂载遮蔽、损坏的 `__init__.py` 与 `melvor.py`；新增 `core/llm.py`、`core/storage.py`、`tests/test_smoke.py` |
@@ -76,7 +77,8 @@
 - ✅ **SQLite 持久化** — 决策日志、状态快照、决策审计入库，支持历史回溯
 - ✅ **真实适配器接入** — `MelvorIdleAdapter.read_state()` 驱动引擎，Web 控制台可切换真实/模拟数据
 - ✅ **Melvor 挂机 Agent** — 仪表盘登录云账号、选择角色、抓取角色数据；三种运行模式（最高效率 / 极限不死亡 / 用户脚本）；事件与决策日志追踪
-- 🔄 **社区学习机制** — Agent 主动学习攻略并迭代自身策略（规划中）
+- ✅ **攻略方针驱动的 LLM 决策（RAG）** — 不再硬编码 7 个操作；枚举全量动态动作目录（全部技能/战斗区域/地牢/屠杀区域），以官方 Wiki + 社区攻略（`guides/`）为方针，LLM 判断账号所处阶段并选择当下最优动作
+- 🔄 **社区学习机制** — Agent 主动学习攻略并迭代自身策略（知识库持续扩充中）
 
 ---
 
@@ -201,15 +203,18 @@ IdleAgent/ v0.6.0
 │   ├── state.py              # Pydantic 数据模型（GameState/Action/GameEvent/枚举...）
 │   ├── auth.py               # 用户认证（密码哈希 + 签名 token + SQLite 用户存储）
 │   ├── melvor_agent.py       # Melvor 挂机会话（账号存储 + 三种运行模式 + 事件/决策追踪）
+│   ├── guide.py              # 攻略知识库检索 + 动作目录格式化（RAG 决策方针）
 │   ├── browser.py            # Playwright 浏览器管理（启动/登录/存档/导航）
 │   ├── safety.py             # 弹窗安全系统（危险词/交易词/损失警告黑名单）
 │   ├── engine.py             # 四层引擎：诊断/规划/决策/执行（含条件求值 + LLM 决策）
 │   ├── llm.py                # LLM 客户端（DeepSeek/OpenAI 兼容，httpx 实现）
 │   ├── storage.py            # SQLite 持久化（日志/状态快照/决策审计/事件）
 │   └── scheduler.py          # APScheduler 定时任务调度
+├── guides/                   # 攻略知识库（官方 Wiki + 社区攻略，Markdown）
+│   └── training_order.md     # 训练顺序方针（What to level first 汉化）
 ├── adapters/                 # 游戏适配器
 │   ├── __init__.py
-│   └── melvor_idle.py        # Melvor Idle 专用适配器（JS注入+DOM解析双策略 + 守卫）
+│   └── melvor_idle.py        # Melvor Idle 专用适配器（JS注入+DOM解析 + 动作目录 + 通用执行器）
 ├── scripts/                  # 可执行脚本
 │   ├── melvor.py             # 完整巡检脚本（脱敏）
 │   └── patrol.py             # 精简守卫脚本（脱敏）
@@ -318,13 +323,17 @@ class MyGameAdapter(GameAdapter):
 优先编辑 `config/rules/melvor_idle.yaml` 中的规则（`safety.hard_constraints[].condition`
 支持形如 `hp / max_hp < 0.2` 的表达式），避免改动核心代码。
 
-### 接入 LLM
+### 接入 LLM（攻略方针驱动的 RAG 决策）
 
-在 `.env` 中配置 `LLM_API_KEY` 即可启用 LLM 决策（`core/engine.py` 的 `DecisionEngine._llm_decide()`）：
-1. 构建 Prompt（包含状态、目标、历史）
-2. 调用 DeepSeek/OpenAI 兼容接口（`core/llm.py`）
-3. 解析 JSON 返回，生成 Action 列表
-4. 记录审计日志（`core/storage.py`）
+在 `.env` 中配置 `LLM_API_KEY` 即可启用 LLM 决策。决策流程（`core/melvor_agent.py` 的 `_llm_actions()`）：
+
+1. 读取【攻略方针】——`core/guide.py` 的 `get_policy()` 从 `guides/` 加载成熟攻略（官方 Wiki + 社区）
+2. 枚举【动态动作目录】——`adapters/melvor_idle.py` 的 `probe_action_catalog()` 从 `window.game` 枚举全部技能动作 + 战斗区域 + 地牢 + 屠杀区域
+3. 组合 Prompt（方针 + 账号状态 + 动作目录 + 运行模式），调用 DeepSeek/OpenAI 兼容接口（`core/llm.py`）
+4. 解析 JSON，得到 `skill`（训练技能）或 `operation`（维护）动作，由 `execute_skill_action` / `execute_operation` 执行
+5. 记录决策审计日志（`core/storage.py`）
+
+**决策原则**：不再硬编码「7 个操作选 1-3 个」，而是把攻略原文交给 LLM，让它对照当前账号状态判断「处于攻略哪个阶段、下一步该做什么」，从全量动作目录中选动作。
 
 ### 数据持久化
 

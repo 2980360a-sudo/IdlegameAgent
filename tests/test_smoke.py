@@ -141,6 +141,32 @@ async def main():
     if os.path.exists(auth_db):
         os.remove(auth_db)
 
+    print('\n== 8. 攻略知识库 + 动作目录（RAG 决策引擎） ==')
+    from core.guide import get_policy, format_action_catalog, load_guides
+    guides = load_guides()
+    check('加载到攻略文件', len(guides) >= 1)
+    policy = get_policy()
+    check('方针非空且含训练顺序', '训练顺序' in policy or '星象' in policy)
+    cat_text = format_action_catalog({
+        'skills': [{'key': 'Woodcutting', 'name': '伐木', 'lv': 99,
+                    'acts': [{'id': 'NormalTree', 'name': '普通树', 'lv': 1},
+                             {'id': 'YewTree', 'name': '紫杉树', 'lv': 60}]}],
+        'areas': [{'id': 'Farmlands', 'name': '农田', 'lv': 3}],
+        'dungeons': [], 'slayerAreas': [],
+    })
+    check('动作目录格式化含技能动作', '普通树' in cat_text and '伐木' in cat_text)
+    check('动作目录格式化含战斗区域', '农田' in cat_text)
+    check('空目录返回空串', format_action_catalog(None) == '')
+
+    print('\n== 9. 攻略方针驱动的 LLM 决策（mock） ==')
+    from core.melvor_agent import MelvorAgentSession
+    sess = MelvorAgentSession(1, mock=True)
+    prompt = sess._build_llm_prompt(sess._mock_state, 'efficiency')
+    check('prompt 含攻略方针', '【攻略方针】' in prompt)
+    check('prompt 含动态动作目录', '【动作目录】' in prompt)
+    check('prompt 含 skill 动作类型说明', 'action_type="skill"' in prompt)
+    check('prompt 含攻略训练顺序方针', '训练顺序' in prompt or '星象' in prompt)
+
     print(f'\n===== 结果: {passed} 通过, {failed} 失败 =====')
     return 0 if failed == 0 else 1
 

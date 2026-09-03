@@ -12,6 +12,7 @@ from typing import Dict, Any, List, Optional
 
 from core.storage import Storage
 from core.llm import LLMClient
+from core.guide import get_policy, format_action_catalog
 from core.state import GameState, Action, ActionType, GameEvent, SkillInfo, ResourceInfo
 
 
@@ -167,6 +168,7 @@ class MelvorAgentSession:
         self._decisions: List[Dict[str, Any]] = []
         self._script: List[Dict[str, Any]] = []
         self._script_last_run: Dict[int, float] = {}
+        self._action_catalog: Optional[Dict[str, Any]] = None
 
         # mock 专用状态
         self._mock_state = self._make_mock_state()
@@ -174,6 +176,28 @@ class MelvorAgentSession:
             {'index': 0, 'label': '最后保存：2026/9/1 10:00:00'},
             {'index': 1, 'label': '最后保存：2026/8/28 22:30:00'},
         ]
+        if mock:
+            self._action_catalog = {
+                'skills': [
+                    {'key': 'Woodcutting', 'name': '伐木', 'lv': 99, 'acts': [
+                        {'id': 'NormalTree', 'name': '普通树', 'lv': 1},
+                        {'id': 'OakTree', 'name': '橡树', 'lv': 10},
+                        {'id': 'YewTree', 'name': '紫杉树', 'lv': 60},
+                    ]},
+                    {'key': 'Astrology', 'name': '星象学', 'lv': 120, 'acts': [
+                        {'id': 'Hyemir', 'name': '海密尔', 'lv': 1},
+                        {'id': 'Ameria', 'name': '艾美利亚', 'lv': 20},
+                        {'id': 'Deedree', 'name': '狄德利', 'lv': 40},
+                    ]},
+                    {'key': 'Fishing', 'name': '钓鱼', 'lv': 87, 'acts': [
+                        {'id': 'RawShrimp', 'name': '生虾', 'lv': 1},
+                        {'id': 'RawLobster', 'name': '生龙虾', 'lv': 40},
+                    ]},
+                ],
+                'areas': [{'id': 'Farmlands', 'name': '农田', 'lv': 3}],
+                'dungeons': [{'id': 'ChickenCoop', 'name': '鸡舍', 'diff': 1}],
+                'slayerAreas': [],
+            }
 
     # ---------- 事件与决策追踪 ----------
     def _log_event(self, event_type: str, severity: str = 'info', details: Dict = None):
@@ -361,6 +385,12 @@ class MelvorAgentSession:
         try:
             if action.action_type == 'operation':
                 return await self.adapter.execute_operation(self._page, action.target)
+            if action.action_type == 'skill':
+                # target = "技能Key:动作名/id"（来自动态动作目录）
+                if ':' in (action.target or ''):
+                    skill_ref, action_ref = action.target.split(':', 1)
+                    return await self.adapter.execute_skill_action(self._page, skill_ref, action_ref)
+                return False
             return await self.adapter.execute_action(self._page, action)
         except Exception:
             return False
@@ -426,10 +456,16 @@ class MelvorAgentSession:
     async def _llm_actions(self, state: GameState, mode: str) -> List[Action]:
         if self.llm is None or not self.llm.configured:
             return []
+        # 探测动态动作目录（真实浏览器；mock 用固定目录）
+        if not self.mock and self._page is not None:
+            try:
+                self._action_catalog = await self.adapter.probe_action_catalog(self._page)
+            except Exception:
+                pass
         prompt = self._build_llm_prompt(state, mode)
         try:
             raw = await self.llm.chat([
-                {'role': 'system', 'content': '你是 Melvor Idle 挂机自动化决策助手，只输出 JSON。'},
+                {'role': 'system', 'content': '你是 Melvor Idle 挂机自动化决策助手，依据攻略方针判断当下最优动作，只输出 JSON。'},
                 {'role': 'user', 'content': prompt},
             ])
             return self._parse_actions(raw)
@@ -460,10 +496,18 @@ class MelvorAgentSession:
             RunMode.SURVIVAL.value: '追求效率但 100% 不允许角色死亡，优先保证安全（HP/食物充足）',
         }.get(mode, '')
 
+        policy = get_policy(state)
+        policy_block = policy or '（暂无攻略知识库）'
+        catalog_text = format_action_catalog(self._action_catalog) or '（无动作目录）'
+
         return (
-            '你是 Melvor Idle 挂机决策助手。根据当前账号状态，从可用操作中选出下一步最合适的操作。\n'
+            '你是 Melvor Idle 挂机决策助手。你的职责是：\n'
+            '1) 阅读【攻略方针】（来自官方 Wiki 与社区成熟攻略）；\n'
+            '2) 对照【当前账号状态】与【动作目录】，判断账号现在处于攻略的哪个阶段；\n'
+            '3) 从动作目录中挑出下一步最该做的具体动作，推进攻略进度。\n\n'
             f'【运行模式】{mode_guide}\n\n'
-            f'【账号状态】\n'
+            f'【攻略方针】\n{policy_block}\n\n'
+            f'【当前账号状态】\n'
             f'- 角色: {raw.get("characterName", "?")}，总等级 {raw.get("totalLevel", "?")}，战斗等级 {state.combat_level or "?"}\n'
             f'- 货币: {currency_text}\n'
             f'- 仓库: {state.bank_used}/{state.bank_max}（物品 {raw.get("bank", {}).get("itemCount", "?")}）\n'
@@ -476,10 +520,16 @@ class MelvorAgentSession:
             f'- 城镇: 等级 {township.get("level", "?")}，健康 {township.get("health", "?")}%，仓储 {township.get("storage", "?")}\n'
             f'- 农务: 等级 {farming.get("level", "?")}，星象: 等级 {astrology.get("level", "?")}（研究 {astrology.get("studying", "无")}）\n'
             f'- 技能: {skills}\n\n'
-            f'【可用操作】\n{ops}\n\n'
-            '请严格输出 JSON，action_type 固定为 operation：\n'
-            '{"actions": [{"action_type": "operation", "target": "操作名", "reason": "简短理由"}]}\n'
-            '每次只输出 1-3 个最合适的操作；若当前状态良好无需操作，输出 {"actions": []}。'
+            f'【动作目录】（可执行的动作空间，格式：动作名(需求等级)）\n{catalog_text}\n\n'
+            f'【维护操作】\n{ops}\n\n'
+            '输出要求：\n'
+            '- reason 字段说明：当前处于攻略哪个阶段 + 为什么做这个动作；\n'
+            '- 训练某技能用 action_type="skill"，target="技能Key:动作名"（技能Key/动作名以【动作目录】为准）；\n'
+            '- 城镇/农务/买仓库/保存等维护用 action_type="operation"，target 用【维护操作】里的名字；\n'
+            '- 只输出当前应做的 1-3 个动作；若已满足攻略当前阶段目标，输出 {"actions": []}；\n'
+            '- 严格输出 JSON，两种动作可混用：\n'
+            '{"actions": [{"action_type": "skill", "target": "Woodcutting:NormalTree", "reason": "..."}, '
+            '{"action_type": "operation", "target": "force_save", "reason": "..."}]}'
         )
 
     def _parse_actions(self, raw: str) -> List[Action]:

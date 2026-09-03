@@ -436,6 +436,135 @@ class MelvorIdleAdapter(GameAdapter):
             log(f'[Adapter] JS 注入异常: {e}')
             return GameState(game_name=self.name)
 
+    async def probe_action_catalog(self, page: Page) -> Dict[str, Any]:
+        """枚举当前账号可执行的「动作目录」：全部技能动作 + 战斗区域/地牢/屠杀区域。
+
+        这是 LLM 决策的动作空间来源（不再硬编码 7 个操作）：
+        每个技能列出「已解锁 + 未来 8 级内」的动作（id/名称/需求等级）。
+        """
+        try:
+            return await page.evaluate(r"""() => {
+                const g = (fn, d = null) => {
+                    try { const v = fn(); return (v === undefined || (typeof v === 'number' && isNaN(v))) ? d : v; }
+                    catch (e) { return d; }
+                };
+                const NORM = (id) => String(id || '').replace(/^melvor[A-Za-z0-9]*:/, '');
+                const out = { skills: [], areas: [], dungeons: [], slayerAreas: [] };
+                // 1) 技能动作目录（遍历 skills 注册表，取技能对象 + 动作）
+                g(() => {
+                    for (const [sid, skill] of game.skills.registeredObjects) {
+                        const reg = skill.actions && skill.actions.registeredObjects;
+                        if (!reg || typeof reg.forEach !== 'function') continue;
+                        const lv = skill.level || 0;
+                        const acts = [];
+                        for (const [aid, a] of reg) {
+                            const al = a.level || 0;
+                            if (al > lv + 8) continue;  // 只收已解锁 + 未来 8 级
+                            acts.push({ id: NORM(aid), name: a.name || NORM(aid), lv: al });
+                        }
+                        acts.sort((x, y) => x.lv - y.lv);
+                        out.skills.push({ key: NORM(sid), name: skill.name || NORM(sid), lv, acts: acts.slice(0, 60) });
+                    }
+                });
+                // 2) 战斗区域（含怪物战斗等级）
+                g(() => {
+                    const reg = game.combatAreas && game.combatAreas.registeredObjects;
+                    if (!reg || typeof reg.forEach !== 'function') return;
+                    for (const [id, a] of reg) {
+                        const m = (a.monsters && a.monsters[0]) ? a.monsters[0] : null;
+                        out.areas.push({ id: NORM(id), name: a.name || NORM(id), lv: m ? (m.combatLevel || 0) : 0 });
+                    }
+                });
+                // 3) 地牢
+                g(() => {
+                    const reg = game.dungeons && game.dungeons.registeredObjects;
+                    if (!reg || typeof reg.forEach !== 'function') return;
+                    for (const [id, d] of reg)
+                        out.dungeons.push({ id: NORM(id), name: d.name || NORM(id), diff: d.difficulty || 0 });
+                });
+                // 4) 屠杀区域
+                g(() => {
+                    const reg = game.slayerAreas && game.slayerAreas.registeredObjects;
+                    if (!reg || typeof reg.forEach !== 'function') return;
+                    for (const [id, a] of reg)
+                        out.slayerAreas.push({ id: NORM(id), name: a.name || NORM(id), lv: a.slayerLevelRequired || 0 });
+                });
+                return out;
+            }""")
+        except Exception as e:
+            log(f'[Adapter] 动作目录枚举失败: {e}')
+            return {'skills': [], 'areas': [], 'dungeons': [], 'slayerAreas': []}
+
+    async def execute_skill_action(self, page: Page, skill_ref: str, action_ref: str) -> bool:
+        """通用开始技能动作：按技能分派到正确的选择方法（selectTree / selectRecipeOnClick / studyConstellationOnClick …）。
+
+        Melvor 各技能选择 API 不统一，此处维护一张「技能→选择方法」映射表；
+        找不到映射或对象时返回 False（调用方记录）。
+        """
+        try:
+            r = await page.evaluate(r"""([skillRef, actionRef]) => {
+                const NORM = (id) => String(id || '').replace(/^melvor[A-Za-z0-9]*:/, '');
+                // 找技能对象
+                let skill = null;
+                for (const [sid, s] of game.skills.registeredObjects) {
+                    if (NORM(sid) === skillRef || (s.name || '') === skillRef || String(s.localID) === skillRef) { skill = s; break; }
+                }
+                if (!skill) return { ok: false, err: 'noskill:' + skillRef };
+                // 找动作对象
+                const reg = skill.actions && skill.actions.registeredObjects;
+                if (!reg || typeof reg.forEach !== 'function') return { ok: false, err: 'noactions' };
+                let action = null;
+                for (const [aid, a] of reg) {
+                    if (NORM(aid) === actionRef || (a.name || '') === actionRef) { action = a; break; }
+                }
+                if (!action) return { ok: false, err: 'noaction:' + actionRef };
+
+                const key = NORM(skill.id);
+                const out = { key, method: '', isActive: !!skill.isActive };
+                const start = () => { try { skill.start(); return !!skill.isActive; } catch (e) { return false; } };
+
+                if (key === 'Woodcutting' && typeof skill.selectTree === 'function') {
+                    skill.selectTree(action); out.method = 'selectTree';
+                } else if (key === 'Astrology' && typeof skill.studyConstellationOnClick === 'function') {
+                    skill.studyConstellationOnClick(action); out.method = 'studyConstellationOnClick';
+                } else if (key === 'Firemaking' && typeof skill.selectLog === 'function') {
+                    skill.selectLog(action); out.method = 'selectLog';
+                    if (typeof skill.burnLog === 'function') { skill.burnLog(); out.method += '+burnLog'; }
+                } else if (key === 'Fishing' && typeof skill.onAreaStartButtonClick === 'function') {
+                    // 钓鱼按区域：action 是区域时直接开始；否则尝试其所属区域
+                    const area = action.area || action;
+                    skill.onAreaStartButtonClick(area); out.method = 'onAreaStartButtonClick';
+                } else if (key === 'Mining' && typeof skill.onRockClick === 'function') {
+                    skill.onRockClick(action); out.method = 'onRockClick';
+                } else if (key === 'Thieving') {
+                    if (typeof skill.onNPCPanelSelection === 'function') { skill.onNPCPanelSelection(action); out.method = 'onNPCPanelSelection'; }
+                    if (typeof skill.startThieving === 'function') { skill.startThieving(); out.method += '+startThieving'; }
+                } else if (key === 'Cooking' && typeof skill.onRecipeSelectionClick === 'function') {
+                    skill.onRecipeSelectionClick(action); out.method = 'onRecipeSelectionClick';
+                    if (typeof skill.onActiveCookButtonClick === 'function') { skill.onActiveCookButtonClick(); out.method += '+cook'; }
+                } else if (key === 'Agility' && typeof skill.startAgilityOnClick === 'function') {
+                    skill.startAgilityOnClick(); out.method = 'startAgilityOnClick';
+                } else if (typeof skill.selectRecipeOnClick === 'function') {
+                    // 工匠类通用：Smithing/Herblore/Fletching/Crafting/Runecrafting/Summoning/AltMagic
+                    skill.selectRecipeOnClick(action); out.method = 'selectRecipeOnClick';
+                    if (typeof skill.start === 'function') { const ok = start(); out.method += '+start'; out.started = ok; }
+                } else {
+                    return { ok: false, err: 'noselector:' + key };
+                }
+
+                out.isActive = !!skill.isActive;
+                out.activeAction = game.activeAction ? game.activeAction.constructor.name : null;
+                out.started = out.started || out.isActive || out.activeAction === key;
+                out.ok = out.started || (key === 'Woodcutting' && out.method.includes('selectTree'));
+                return out;
+            }""", [skill_ref, action_ref])
+            ok = bool(isinstance(r, dict) and r.get('ok'))
+            log(f'[操作] 技能动作 {skill_ref}:{action_ref} → {r}')
+            return ok
+        except Exception as e:
+            log(f'[Adapter] 技能动作执行失败 {skill_ref}:{action_ref}: {e}')
+            return False
+
     async def _wait_game_ready(self, page: Page, timeout_s: int = 90) -> bool:
         """轮询直到 window.game 核心对象加载完成。"""
         deadline = asyncio.get_event_loop().time() + timeout_s
