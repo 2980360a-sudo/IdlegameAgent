@@ -391,6 +391,12 @@ class MelvorAgentSession:
                     skill_ref, action_ref = action.target.split(':', 1)
                     return await self.adapter.execute_skill_action(self._page, skill_ref, action_ref)
                 return False
+            if action.action_type == 'combat':
+                # target = "area:区域名" / "dungeon:地牢名" / "slayer:屠杀区域名"
+                if ':' in (action.target or ''):
+                    ttype, tref = action.target.split(':', 1)
+                    return await self.adapter.execute_combat_action(self._page, ttype, tref)
+                return False
             return await self.adapter.execute_action(self._page, action)
         except Exception:
             return False
@@ -525,10 +531,12 @@ class MelvorAgentSession:
             '输出要求：\n'
             '- reason 字段说明：当前处于攻略哪个阶段 + 为什么做这个动作；\n'
             '- 训练某技能用 action_type="skill"，target="技能Key:动作名"（技能Key/动作名以【动作目录】为准）；\n'
+            '- 战斗用 action_type="combat"，target 取 "area:区域名" / "dungeon:地牢名" / "slayer:屠杀区域名"（以【动作目录】为准）；\n'
             '- 城镇/农务/买仓库/保存等维护用 action_type="operation"，target 用【维护操作】里的名字；\n'
             '- 只输出当前应做的 1-3 个动作；若已满足攻略当前阶段目标，输出 {"actions": []}；\n'
-            '- 严格输出 JSON，两种动作可混用：\n'
+            '- 严格输出 JSON，动作可混用：\n'
             '{"actions": [{"action_type": "skill", "target": "Woodcutting:NormalTree", "reason": "..."}, '
+            '{"action_type": "combat", "target": "area:农田", "reason": "..."}, '
             '{"action_type": "operation", "target": "force_save", "reason": "..."}]}'
         )
 
@@ -587,6 +595,9 @@ class MelvorAgentSession:
 
     def _is_death_risky(self, action: Action) -> bool:
         target = (action.target or '').lower()
+        # 战斗类动作：生存模式下需经过「Can I Idle」判断，LLM 只在安全时才会选；此处保守拦截
+        if action.action_type == 'combat':
+            return True
         if action.action_type == ActionType.NAVIGATE.value:
             return any(t in target for t in ('combat', '战斗', 'dungeon', '地下城', 'monster', '怪物'))
         if action.action_type == ActionType.CLICK.value:

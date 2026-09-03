@@ -183,6 +183,9 @@ async def main():
         async def execute_skill_action(self, page, skill_ref, action_ref):
             self.calls.append(('skill', skill_ref, action_ref))
             return True
+        async def execute_combat_action(self, page, target_type, target_ref):
+            self.calls.append(('combat', target_type, target_ref))
+            return True
         async def execute_operation(self, page, name):
             self.calls.append(('operation', name))
             return True
@@ -193,19 +196,30 @@ async def main():
 
     from core.melvor_agent import MelvorAgentSession
     llm = FakeLLM('{"actions": [{"action_type": "skill", "target": "Woodcutting:NormalTree", "reason": "按训练顺序练伐木"}, '
+                  '{"action_type": "combat", "target": "area:农田", "reason": "战斗等级足够"}, '
                   '{"action_type": "operation", "target": "force_save", "reason": "保存"}]}')
     fake_ad = FakeMelvorAdapter()
     s2 = MelvorAgentSession(2, adapter=fake_ad, llm=llm, mock=False)
     s2._page = object()  # 让 _llm_actions 走探测分支、_execute 不因 page 为 None 提前返回
     actions = await s2._llm_actions(make_low_hp_state(), 'efficiency')
-    check('LLM 返回 2 个动作', len(actions) == 2)
+    check('LLM 返回 3 个动作', len(actions) == 3)
     check('第 1 个是 skill 动作', actions[0].action_type == 'skill')
     check('skill 目标格式 skill:action', actions[0].target == 'Woodcutting:NormalTree')
-    check('第 2 个是 operation 动作', actions[1].action_type == 'operation')
+    check('第 2 个是 combat 动作', actions[1].action_type == 'combat')
+    check('第 3 个是 operation 动作', actions[2].action_type == 'operation')
     await s2._execute(actions[0])
     await s2._execute(actions[1])
+    await s2._execute(actions[2])
     check('执行分派到 execute_skill_action', ('skill', 'Woodcutting', 'NormalTree') in fake_ad.calls)
+    check('执行分派到 execute_combat_action', ('combat', 'area', '农田') in fake_ad.calls)
     check('执行分派到 execute_operation', ('operation', 'force_save') in fake_ad.calls)
+
+    # 生存模式：combat 动作应被死亡风险过滤拦截
+    s3 = MelvorAgentSession(3, adapter=fake_ad, llm=llm, mock=False)
+    s3._page = object()
+    risky = await s3._llm_actions(make_low_hp_state(), 'survival')
+    filtered = s3._filter_death_risky(risky)
+    check('生存模式拦截 combat 动作', all(a.action_type != 'combat' for a in filtered))
 
     print(f'\n===== 结果: {passed} 通过, {failed} 失败 =====')
     return 0 if failed == 0 else 1

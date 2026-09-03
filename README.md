@@ -1,8 +1,8 @@
-# IdleAgent v0.7.0 🎮🤖
+# IdleAgent v0.7.1 🎮🤖
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/Version-0.7.0-green.svg)]()
+[![Version](https://img.shields.io/badge/Version-0.7.1-green.svg)]()
 [![Status](https://img.shields.io/badge/Status-Beta-orange.svg)]()
 
 一个基于 LLM 的通用挂机游戏（Idle/Incremental Games）自动化决策 Agent 框架。支持多游戏接入、可配置决策规则、可审计决策日志与持续策略学习。
@@ -13,15 +13,16 @@
 
 ## 版本信息
 
-- **当前版本**: v0.7.0
+- **当前版本**: v0.7.1
 - **发布日期**: 2026-09-03
-- **更新内容**: LLM 决策从「7 个硬编码操作」升级为「攻略方针驱动的 RAG 决策」——枚举全量动态动作目录（全部技能/战斗区域/地牢），以官方 Wiki + 社区攻略为方针判断当下最优动作
+- **更新内容**: 补全动作执行逻辑——新增战斗执行（选择战斗区域/怪物/地牢/屠杀区域）+ 完善剩余技能分派（采矿/烹饪/扒窃/灵巧/钓鱼/生火）；动作类型从 2 类（skill/operation）扩展到 3 类（skill/combat/operation）
 
 ### 版本历史
 
 | 版本 | 日期 | 更新内容 |
 |------|------|---------|
-| v0.7.0 | 2026-09-03 | 攻略方针驱动的 LLM 决策：新增 `guides/` 攻略知识库（训练顺序方针）+ `core/guide.py` 检索模块；新增动态动作目录 `probe_action_catalog`（枚举全部技能动作/战斗区域/地牢/屠杀区域）+ 通用技能执行器 `execute_skill_action`（selectTree/selectRecipeOnClick/studyConstellationOnClick…）；LLM 依据攻略判断当前阶段并选动作，不再硬编码 7 操作 |
+| v0.7.1 | 2026-09-03 | 补全动作执行：新增 `execute_combat_action`（area/dungeon/slayer 三路，`selectMonster`/`selectDungeon`）；`execute_skill_action` 分派表补全采矿 `onRockClick`、钓鱼 `onAreaStartButtonClick`、烹饪 `onRecipeSelectionClick`、扒窃 `onNPCPanelSelection`、灵巧 `startAgilityOnClick`；LLM 新增 `combat` 动作类型 + 生存模式死亡风险拦截 |
+| v0.7.0 | 2026-09-03 | 攻略方针驱动的 LLM 决策：新增 `guides/` 攻略知识库（训练顺序方针）+ `core/guide.py` 检索模块；新增动态动作目录 `probe_action_catalog`（枚举全部技能动作/战斗区域/地牢/屠杀区域）+ 通用技能执行器 `execute_skill_action`；LLM 依据攻略判断当前阶段并选动作，不再硬编码 7 操作 |
 | v0.6.0 | 2026-09-03 | 新增 Melvor 挂机 Agent：云账号登录 + 角色选择 + 角色数据抓取展示；LLM 决策 + 三种运行模式（效率/不死亡/用户脚本）；事件与决策日志追踪（`core/melvor_agent.py` + `/api/melvor/*`） |
 | v0.5.0 | 2026-09-03 | 新增用户认证（注册/登录/资料，`core/auth.py` + `/api/auth/*`）；前端重构为登录/注册 + 仪表盘 + 个人资料 |
 | v0.4.0 | 2026-09-03 | 完成「真实适配器接入引擎」「LLM 决策（DeepSeek）」「SQLite 持久化」；修复适配器/数据模型不一致、`/health` 被静态挂载遮蔽、损坏的 `__init__.py` 与 `melvor.py`；新增 `core/llm.py`、`core/storage.py`、`tests/test_smoke.py` |
@@ -77,7 +78,8 @@
 - ✅ **SQLite 持久化** — 决策日志、状态快照、决策审计入库，支持历史回溯
 - ✅ **真实适配器接入** — `MelvorIdleAdapter.read_state()` 驱动引擎，Web 控制台可切换真实/模拟数据
 - ✅ **Melvor 挂机 Agent** — 仪表盘登录云账号、选择角色、抓取角色数据；三种运行模式（最高效率 / 极限不死亡 / 用户脚本）；事件与决策日志追踪
-- ✅ **攻略方针驱动的 LLM 决策（RAG）** — 不再硬编码 7 个操作；枚举全量动态动作目录（全部技能/战斗区域/地牢/屠杀区域），以官方 Wiki + 社区攻略（`guides/`）为方针，LLM 判断账号所处阶段并选择当下最优动作
+- ✅ **攻略方针驱动的 LLM 决策（RAG）** — 不再硬编码 7 个操作；枚举全量动态动作目录（全部技能/战斗区域/地牢/屠杀区域/城镇建筑），以官方 Wiki + 社区攻略（`guides/`）为方针，LLM 判断账号所处阶段并选择当下最优动作
+- ✅ **全维度动作执行** — 三类动作：`skill`（训练技能，含采集/工匠/农务/召唤等分派）、`combat`（战斗区域/地牢/屠杀区域）、`operation`（城镇/农务/仓库/保存等维护）
 - 🔄 **社区学习机制** — Agent 主动学习攻略并迭代自身策略（知识库持续扩充中）
 
 ---

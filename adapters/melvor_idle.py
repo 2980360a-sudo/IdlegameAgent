@@ -505,7 +505,7 @@ class MelvorIdleAdapter(GameAdapter):
     async def execute_skill_action(self, page: Page, skill_ref: str, action_ref: str) -> bool:
         """通用开始技能动作：按技能分派到正确的选择方法（selectTree / selectRecipeOnClick / studyConstellationOnClick …）。
 
-        Melvor 各技能选择 API 不统一，此处维护一张「技能→选择方法」映射表；
+        Melvor 各技能选择 API 不统一，此处维护一张「技能→选择方法」分派表；
         找不到映射或对象时返回 False（调用方记录）。
         """
         try:
@@ -528,7 +528,7 @@ class MelvorIdleAdapter(GameAdapter):
 
                 const key = NORM(skill.id);
                 const out = { key, method: '', isActive: !!skill.isActive };
-                const start = () => { try { skill.start(); return !!skill.isActive; } catch (e) { return false; } };
+                const tryStart = () => { try { skill.start(); return !!skill.isActive; } catch (e) { return false; } };
 
                 if (key === 'Woodcutting' && typeof skill.selectTree === 'function') {
                     skill.selectTree(action); out.method = 'selectTree';
@@ -537,24 +537,29 @@ class MelvorIdleAdapter(GameAdapter):
                 } else if (key === 'Firemaking' && typeof skill.selectLog === 'function') {
                     skill.selectLog(action); out.method = 'selectLog';
                     if (typeof skill.burnLog === 'function') { skill.burnLog(); out.method += '+burnLog'; }
-                } else if (key === 'Fishing' && typeof skill.onAreaStartButtonClick === 'function') {
-                    // 钓鱼按区域：action 是区域时直接开始；否则尝试其所属区域
-                    const area = action.area || action;
-                    skill.onAreaStartButtonClick(area); out.method = 'onAreaStartButtonClick';
                 } else if (key === 'Mining' && typeof skill.onRockClick === 'function') {
                     skill.onRockClick(action); out.method = 'onRockClick';
+                } else if (key === 'Fishing') {
+                    // 钓鱼按区域开始：鱼动作对象带 area 字段，或直接当区域用
+                    const area = action.area || action;
+                    if (typeof skill.onAreaStartButtonClick === 'function') { skill.onAreaStartButtonClick(area); out.method = 'onAreaStartButtonClick'; }
                 } else if (key === 'Thieving') {
                     if (typeof skill.onNPCPanelSelection === 'function') { skill.onNPCPanelSelection(action); out.method = 'onNPCPanelSelection'; }
                     if (typeof skill.startThieving === 'function') { skill.startThieving(); out.method += '+startThieving'; }
-                } else if (key === 'Cooking' && typeof skill.onRecipeSelectionClick === 'function') {
-                    skill.onRecipeSelectionClick(action); out.method = 'onRecipeSelectionClick';
-                    if (typeof skill.onActiveCookButtonClick === 'function') { skill.onActiveCookButtonClick(); out.method += '+cook'; }
+                } else if (key === 'Cooking') {
+                    if (typeof skill.onRecipeSelectionClick === 'function') { skill.onRecipeSelectionClick(action); out.method = 'onRecipeSelectionClick'; }
+                    const cat = action.category || action;
+                    if (typeof skill.onActiveCookButtonClick === 'function') { skill.onActiveCookButtonClick(cat); out.method += '+cook'; }
                 } else if (key === 'Agility' && typeof skill.startAgilityOnClick === 'function') {
                     skill.startAgilityOnClick(); out.method = 'startAgilityOnClick';
                 } else if (typeof skill.selectRecipeOnClick === 'function') {
                     // 工匠类通用：Smithing/Herblore/Fletching/Crafting/Runecrafting/Summoning/AltMagic
                     skill.selectRecipeOnClick(action); out.method = 'selectRecipeOnClick';
-                    if (typeof skill.start === 'function') { const ok = start(); out.method += '+start'; out.started = ok; }
+                    // Fletching 多产物（altRecipe）：选默认 alt 后开跑
+                    if (typeof skill.selectAltRecipeOnClick === 'function' && action.altRecipe !== undefined) {
+                        try { skill.selectAltRecipeOnClick(action.altRecipe.id); out.method += '+alt'; } catch (e) {}
+                    }
+                    if (typeof skill.start === 'function') { const ok = tryStart(); out.method += '+start'; out.started = ok; }
                 } else {
                     return { ok: false, err: 'noselector:' + key };
                 }
@@ -562,7 +567,7 @@ class MelvorIdleAdapter(GameAdapter):
                 out.isActive = !!skill.isActive;
                 out.activeAction = game.activeAction ? game.activeAction.constructor.name : null;
                 out.started = out.started || out.isActive || out.activeAction === key;
-                out.ok = out.started || (key === 'Woodcutting' && out.method.includes('selectTree'));
+                out.ok = out.started || out.method === 'selectTree' || out.method === 'studyConstellationOnClick';
                 return out;
             }""", [skill_ref, action_ref])
             ok = bool(isinstance(r, dict) and r.get('ok'))
@@ -570,6 +575,59 @@ class MelvorIdleAdapter(GameAdapter):
             return ok
         except Exception as e:
             log(f'[Adapter] 技能动作执行失败 {skill_ref}:{action_ref}: {e}')
+            return False
+
+    async def execute_combat_action(self, page: Page, target_type: str, target_ref: str) -> bool:
+        """通用开始战斗：选战斗区域（打第一个怪）/ 地牢 / 屠杀区域。
+
+        target_type: area | dungeon | slayer
+        返回是否成功（True=已进入战斗）。
+        """
+        try:
+            r = await page.evaluate(r"""([ttype, tref]) => {
+                const NORM = (id) => String(id || '').replace(/^melvor[A-Za-z0-9]*:/, '');
+                const find = (registry, ref) => {
+                    // 注册表可能是 NamespaceRegistry（含 .registeredObjects Map）或直接是 Map
+                    const reg = registry && registry.registeredObjects ? registry.registeredObjects : registry;
+                    if (!reg || typeof reg.forEach !== 'function') return null;
+                    for (const [id, o] of reg) {
+                        if (NORM(id) === ref || (o.name || '') === ref) return o;
+                    }
+                    return null;
+                };
+                const firstMonster = (area) => (area && area.monsters && area.monsters.length) ? area.monsters[0] : null;
+                const c = game.combat;
+                let out = { ttype, method: '', isActive: !!c.isActive };
+
+                if (ttype === 'dungeon') {
+                    const d = find(game.dungeons, tref);
+                    if (!d) return { ok: false, err: 'nodungeon:' + tref };
+                    c.selectDungeon(d); out.method = 'selectDungeon';
+                } else if (ttype === 'slayer') {
+                    const a = find(game.slayerAreas, tref);
+                    if (!a) return { ok: false, err: 'noslayer:' + tref };
+                    const m = firstMonster(a);
+                    if (!m) return { ok: false, err: 'nomonster' };
+                    c.selectMonster(m, a); out.method = 'selectMonster(slayer)';
+                } else { // area
+                    const a = find(game.combatAreas, tref);
+                    if (!a) return { ok: false, err: 'noarea:' + tref };
+                    const m = firstMonster(a);
+                    if (!m) return { ok: false, err: 'nomonster' };
+                    c.selectMonster(m, a); out.method = 'selectMonster(area)';
+                }
+
+                out.isActive = !!c.isActive;
+                out.selectedMonster = c.selectedMonster ? c.selectedMonster.name : null;
+                out.selectedArea = c.selectedArea ? c.selectedArea.name : null;
+                out.ok = out.isActive || !!c.selectedMonster;
+                return out;
+            }""", [target_type, target_ref])
+            ok = bool(isinstance(r, dict) and r.get('ok'))
+            log(f'[操作] 战斗动作 {target_type}:{target_ref} → {r}')
+            return ok
+        except Exception as e:
+            log(f'[Adapter] 战斗动作执行失败 {target_type}:{target_ref}: {e}')
             return False
 
     async def _wait_game_ready(self, page: Page, timeout_s: int = 90) -> bool:
