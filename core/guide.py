@@ -34,7 +34,7 @@ def load_guides() -> Dict[str, str]:
     return guides
 
 
-def get_policy(state: Optional[GameState] = None, max_chars: int = 6000) -> str:
+def get_policy(state: Optional[GameState] = None, max_chars: int = 9000) -> str:
     """返回注入 LLM 的「方针」文本。
 
     当前策略：按相关度排序后拼接全部攻略（截断到 max_chars）。
@@ -95,6 +95,9 @@ def format_action_catalog(catalog: Optional[Dict] = None, max_chars: int = 4000)
     slayer = catalog.get('slayerAreas') or []
     if slayer:
         lines.append('- 屠杀区域: ' + ', '.join(f"{a.get('name')}({a.get('lv')})" for a in slayer[:20]))
+    buildings = catalog.get('buildings') or []
+    if buildings:
+        lines.append('- 城镇建筑: ' + ', '.join(f"{b.get('name')}" for b in buildings[:40]))
 
     text = '\n'.join(lines)
     if len(text) > max_chars:

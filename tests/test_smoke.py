@@ -167,6 +167,47 @@ async def main():
     check('prompt 含 skill 动作类型说明', 'action_type="skill"' in prompt)
     check('prompt 含攻略训练顺序方针', '训练顺序' in prompt or '星象' in prompt)
 
+    print('\n== 10. 完整闭环：攻略方针 + 动作目录 → LLM 决策 → 执行 ==')
+    class FakeLLM:
+        configured = True
+        def __init__(self, reply):
+            self._reply = reply
+        async def chat(self, messages, temperature=None):
+            return self._reply
+
+    class FakeMelvorAdapter:
+        def __init__(self):
+            self.calls = []
+        async def probe_action_catalog(self, page):
+            return {'skills': [], 'areas': [], 'dungeons': [], 'slayerAreas': [], 'buildings': []}
+        async def execute_skill_action(self, page, skill_ref, action_ref):
+            self.calls.append(('skill', skill_ref, action_ref))
+            return True
+        async def execute_operation(self, page, name):
+            self.calls.append(('operation', name))
+            return True
+        async def execute_action(self, page, action):
+            return True
+        async def read_state(self, page):
+            return make_low_hp_state()
+
+    from core.melvor_agent import MelvorAgentSession
+    llm = FakeLLM('{"actions": [{"action_type": "skill", "target": "Woodcutting:NormalTree", "reason": "按训练顺序练伐木"}, '
+                  '{"action_type": "operation", "target": "force_save", "reason": "保存"}]}')
+    fake_ad = FakeMelvorAdapter()
+    s2 = MelvorAgentSession(2, adapter=fake_ad, llm=llm, mock=False)
+    s2._action_catalog = fake_ad  # 无动作目录占位（prompt 走「无动作目录」分支）
+    s2._page = object()  # 让 _execute 不因 page 为 None 提前返回
+    actions = await s2._llm_actions(make_low_hp_state(), 'efficiency')
+    check('LLM 返回 2 个动作', len(actions) == 2)
+    check('第 1 个是 skill 动作', actions[0].action_type == 'skill')
+    check('skill 目标格式 skill:action', actions[0].target == 'Woodcutting:NormalTree')
+    check('第 2 个是 operation 动作', actions[1].action_type == 'operation')
+    await s2._execute(actions[0])
+    await s2._execute(actions[1])
+    check('执行分派到 execute_skill_action', ('skill', 'Woodcutting', 'NormalTree') in fake_ad.calls)
+    check('执行分派到 execute_operation', ('operation', 'force_save') in fake_ad.calls)
+
     print(f'\n===== 结果: {passed} 通过, {failed} 失败 =====')
     return 0 if failed == 0 else 1
 

@@ -449,7 +449,7 @@ class MelvorIdleAdapter(GameAdapter):
                     catch (e) { return d; }
                 };
                 const NORM = (id) => String(id || '').replace(/^melvor[A-Za-z0-9]*:/, '');
-                const out = { skills: [], areas: [], dungeons: [], slayerAreas: [] };
+                const out = { skills: [], areas: [], dungeons: [], slayerAreas: [], buildings: [] };
                 // 1) 技能动作目录（遍历 skills 注册表，取技能对象 + 动作）
                 g(() => {
                     for (const [sid, skill] of game.skills.registeredObjects) {
@@ -489,11 +489,18 @@ class MelvorIdleAdapter(GameAdapter):
                     for (const [id, a] of reg)
                         out.slayerAreas.push({ id: NORM(id), name: a.name || NORM(id), lv: a.slayerLevelRequired || 0 });
                 });
+                // 5) 城镇建筑（可建造/升级目标）
+                g(() => {
+                    const reg = game.township && game.township.buildings && game.township.buildings.registeredObjects;
+                    if (!reg || typeof reg.forEach !== 'function') return;
+                    for (const [id, b] of reg)
+                        out.buildings.push({ id: NORM(id), name: b.name || NORM(id) });
+                });
                 return out;
             }""")
         except Exception as e:
             log(f'[Adapter] 动作目录枚举失败: {e}')
-            return {'skills': [], 'areas': [], 'dungeons': [], 'slayerAreas': []}
+            return {'skills': [], 'areas': [], 'dungeons': [], 'slayerAreas': [], 'buildings': []}
 
     async def execute_skill_action(self, page: Page, skill_ref: str, action_ref: str) -> bool:
         """通用开始技能动作：按技能分派到正确的选择方法（selectTree / selectRecipeOnClick / studyConstellationOnClick …）。
