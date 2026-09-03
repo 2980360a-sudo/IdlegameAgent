@@ -517,7 +517,26 @@ class MelvorIdleAdapter(GameAdapter):
                     if (NORM(sid) === skillRef || (s.name || '') === skillRef || String(s.localID) === skillRef) { skill = s; break; }
                 }
                 if (!skill) return { ok: false, err: 'noskill:' + skillRef };
-                // 找动作对象
+                const key = NORM(skill.id);
+                const out = { key, method: '', isActive: !!skill.isActive };
+                const finish = () => {
+                    out.isActive = !!skill.isActive;
+                    out.activeAction = game.activeAction ? game.activeAction.constructor.name : null;
+                    out.started = out.started || out.isActive || out.activeAction === key;
+                    out.ok = out.started || out.method === 'selectTree' || out.method === 'studyConstellationOnClick';
+                    return out;
+                };
+                const tryStart = () => { try { skill.start(); return !!skill.isActive; } catch (e) { return false; } };
+
+                // 1) 无需动作对象的技能（灵巧：直接开跑当前障碍课程）
+                if (key === 'Agility') {
+                    if (typeof skill.startAgilityOnClick === 'function') {
+                        skill.startAgilityOnClick(); out.method = 'startAgilityOnClick';
+                    }
+                    return finish();
+                }
+
+                // 2) 需要动作对象：查找
                 const reg = skill.actions && skill.actions.registeredObjects;
                 if (!reg || typeof reg.forEach !== 'function') return { ok: false, err: 'noactions' };
                 let action = null;
@@ -525,10 +544,6 @@ class MelvorIdleAdapter(GameAdapter):
                     if (NORM(aid) === actionRef || (a.name || '') === actionRef) { action = a; break; }
                 }
                 if (!action) return { ok: false, err: 'noaction:' + actionRef };
-
-                const key = NORM(skill.id);
-                const out = { key, method: '', isActive: !!skill.isActive };
-                const tryStart = () => { try { skill.start(); return !!skill.isActive; } catch (e) { return false; } };
 
                 if (key === 'Woodcutting' && typeof skill.selectTree === 'function') {
                     skill.selectTree(action); out.method = 'selectTree';
@@ -540,18 +555,15 @@ class MelvorIdleAdapter(GameAdapter):
                 } else if (key === 'Mining' && typeof skill.onRockClick === 'function') {
                     skill.onRockClick(action); out.method = 'onRockClick';
                 } else if (key === 'Fishing') {
-                    // 钓鱼按区域开始：鱼动作对象带 area 字段，或直接当区域用
                     const area = action.area || action;
                     if (typeof skill.onAreaStartButtonClick === 'function') { skill.onAreaStartButtonClick(area); out.method = 'onAreaStartButtonClick'; }
                 } else if (key === 'Thieving') {
-                    if (typeof skill.onNPCPanelSelection === 'function') { skill.onNPCPanelSelection(action); out.method = 'onNPCPanelSelection'; }
-                    if (typeof skill.startThieving === 'function') { skill.startThieving(); out.method += '+startThieving'; }
+                    // startThieving(area, npc)：NPC 对象带 .area 字段
+                    if (typeof skill.startThieving === 'function') { skill.startThieving(action.area, action); out.method = 'startThieving'; }
                 } else if (key === 'Cooking') {
                     if (typeof skill.onRecipeSelectionClick === 'function') { skill.onRecipeSelectionClick(action); out.method = 'onRecipeSelectionClick'; }
                     const cat = action.category || action;
                     if (typeof skill.onActiveCookButtonClick === 'function') { skill.onActiveCookButtonClick(cat); out.method += '+cook'; }
-                } else if (key === 'Agility' && typeof skill.startAgilityOnClick === 'function') {
-                    skill.startAgilityOnClick(); out.method = 'startAgilityOnClick';
                 } else if (typeof skill.selectRecipeOnClick === 'function') {
                     // 工匠类通用：Smithing/Herblore/Fletching/Crafting/Runecrafting/Summoning/AltMagic
                     skill.selectRecipeOnClick(action); out.method = 'selectRecipeOnClick';
@@ -563,12 +575,7 @@ class MelvorIdleAdapter(GameAdapter):
                 } else {
                     return { ok: false, err: 'noselector:' + key };
                 }
-
-                out.isActive = !!skill.isActive;
-                out.activeAction = game.activeAction ? game.activeAction.constructor.name : null;
-                out.started = out.started || out.isActive || out.activeAction === key;
-                out.ok = out.started || out.method === 'selectTree' || out.method === 'studyConstellationOnClick';
-                return out;
+                return finish();
             }""", [skill_ref, action_ref])
             ok = bool(isinstance(r, dict) and r.get('ok'))
             log(f'[操作] 技能动作 {skill_ref}:{action_ref} → {r}')
