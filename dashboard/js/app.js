@@ -482,8 +482,16 @@
             $$('input[name="mv-mode"]').forEach(function (r) {
                 r.addEventListener('change', function () {
                     $('#mv-script-editor').classList.toggle('hidden', r.value !== 'manual');
+                    syncModeCardSelected();
                 });
             });
+        });
+    }
+
+    function syncModeCardSelected() {
+        $$('.mode-card').forEach(function (card) {
+            var r = card.querySelector('input[type="radio"]');
+            card.classList.toggle('selected', !!(r && r.checked));
         });
     }
 
@@ -495,6 +503,7 @@
                 var r = document.querySelector('input[name="mv-mode"][value="' + c.mode + '"]');
                 if (r) { r.checked = true; $('#mv-script-editor').classList.toggle('hidden', c.mode !== 'manual'); }
             }
+            syncModeCardSelected();
             var script = c.script || [];
             $('#mv-script').value = script.length ? JSON.stringify(script, null, 2) : defaultManualScript();
             if (c.character_index != null) {
@@ -572,7 +581,7 @@
             $('#mv-mode-label').textContent = (s.mode_label || '') + (s.character_label ? ' · ' + s.character_label : '');
             var warn = $('#mv-running-warning');
             if (warn) warn.classList.toggle('hidden', s.session_state !== 'running');
-            renderMelvorData(s.game);
+            renderMelvorData(s.game, s.session_state);
             renderMonitor(s);
         }).catch(function () {});
         API.melvorEvents().then(function (d) { renderMelvorLogs('#mv-events', d.events || [], 'event'); }).catch(function () {});
@@ -580,6 +589,7 @@
     }
 
     function renderMonitor(s) {
+        updateSidebarStatus(s.session_state);
         var llm = s.llm || {};
         var u = llm.usage || {};
         var stateEl = $('#mv-llm-state');
@@ -649,9 +659,23 @@
         return { 'idle': '未连接', 'connected': '已连接', 'running': '运行中', 'error': '错误' }[s] || s || '';
     }
 
+    function updateSidebarStatus(s) {
+        var dot = $('#sidebarStatusDot');
+        var txt = $('#sidebarStatusText');
+        if (!dot || !txt) return;
+        var cls = (s === 'running') ? 'running' : (s === 'connected') ? 'connected' : (s === 'error') ? 'error' : '';
+        dot.className = 'status-dot' + (cls ? ' ' + cls : '');
+        txt.textContent = 'Agent ' + (sessionText(s) || '未连接');
+    }
+
     function statCard(label, value) { return '<div class="stat-card small"><div class="stat-label">' + label + '</div><div class="stat-value">' + escapeHtml(value) + '</div></div>'; }
     function panel(title, body) { return '<div class="panel"><div class="panel-header"><span class="panel-title">' + title + '</span></div><div class="panel-body"><ul class="kv-list">' + body + '</ul></div></div>'; }
     function kvRow(k, v) { return '<li><span class="kv-k">' + k + '</span><span class="kv-v">' + escapeHtml(v) + '</span></li>'; }
+    function kvProgress(k, v, pct, barCls) {
+        var cls = barCls ? ' ' + barCls : '';
+        return '<li class="kv-progress"><span class="kv-k">' + k + '</span><span class="kv-v">' + escapeHtml(v) + '</span>' +
+            '<div class="progress"><div class="progress-bar' + cls + '" style="width:' + (pct || 0) + '%"></div></div></li>';
+    }
     function fmtCompact(v) {
         var n = Number(v);
         if (v == null || isNaN(n)) return '-';
@@ -661,9 +685,9 @@
         return n.toFixed(0);
     }
 
-    function renderMelvorData(game) {
+    function renderMelvorData(game, sessionState) {
         var el = $('#mv-data');
-        if (!game) { el.innerHTML = '<div class="empty">尚未连接角色</div>'; return; }
+        if (!game) { el.innerHTML = '<div class="empty"><div class="empty-icon">🎮</div>尚未连接角色</div>'; return; }
         var raw = game.raw_probe || {};
         var hp = game.hp || 0, maxHp = game.max_hp || 0;
         var combat = raw.combat || {};
@@ -671,13 +695,20 @@
         var ts = raw.township || game.township || {};
         var fm = raw.farming || game.farming || {};
         var astro = raw.astrology || game.astrology || {};
+        var sess = sessionState || 'idle';
+        var hpPct = (maxHp > 0) ? Math.min(100, Math.round(hp / maxHp * 100)) : 0;
+        var bankUsed = game.bank_used || 0, bankMax = game.bank_max || 0;
+        var bankPct = (bankMax > 0) ? Math.min(100, Math.round(bankUsed / bankMax * 100)) : 0;
+        var hpBarCls = hpPct <= 30 ? 'danger' : (hpPct <= 60 ? 'warning' : '');
+        var bankBarCls = bankPct >= 90 ? 'warning' : '';
 
         var html = '';
 
         // ===== 概览 =====
         html += '<div class="mv-overview">';
         html += '<div class="mv-char"><div class="profile-avatar">' + escapeHtml((raw.characterName || '?').charAt(0).toUpperCase()) + '</div>';
-        html += '<div><div class="profile-name">' + escapeHtml(raw.characterName || '未知角色') + '</div>';
+        html += '<div><div class="profile-name">' + escapeHtml(raw.characterName || '未知角色') + ' ' +
+            '<span class="status-pill ' + escapeHtml(sess) + '"><span class="status-dot ' + escapeHtml(sess) + '"></span>' + escapeHtml(sessionText(sess)) + '</span></div>';
         html += '<div class="profile-line">总等级 ' + (raw.totalLevel != null ? raw.totalLevel : '-') + ' · 战斗等级 ' + (game.combat_level != null ? game.combat_level : '-') + '</div></div></div>';
         html += '<div class="mv-stat-grid">';
         html += statCard('💰 金币', fmtCompact(game.gold));
@@ -686,11 +717,14 @@
         html += statCard('📦 仓库', fmt(game.bank_used) + ' / ' + fmt(game.bank_max));
         html += statCard('🧰 物品', fmt(raw.bank ? raw.bank.itemCount : null));
         html += statCard('🎯 当前动作', game.active_action || '空闲');
-        html += '</div></div>';
+        html += '</div>';
+        html += '<div class="bank-progress"><span class="bank-progress-label">📦 仓库容量 ' + fmt(game.bank_used) + ' / ' + fmt(game.bank_max) + '</span>' +
+            '<div class="progress"><div class="progress-bar' + bankBarCls + '" style="width:' + bankPct + '%"></div></div></div>';
+        html += '</div>';
 
         // ===== 战斗 =====
         html += panel('⚔ 战斗',
-            kvRow('生命', hp + ' / ' + maxHp + (combat.active ? '（战斗中）' : '')) +
+            kvProgress('生命', hp + ' / ' + maxHp + (combat.active ? '（战斗中）' : ''), hpPct, hpBarCls) +
             kvRow('食物', combat.food ? (combat.food.name + ' × ' + combat.food.qty) : '无') +
             kvRow('自动进食', combat.autoEatTier != null ? ('Tier ' + combat.autoEatTier + (combat.autoEatThreshold != null ? ' · 阈值 ' + combat.autoEatThreshold : '')) : '无') +
             kvRow('屠杀任务', combat.slayerTask ? (combat.slayerTask.monster + '（剩 ' + combat.slayerTask.killsLeft + '）') : '无') +
