@@ -181,7 +181,7 @@ docker run -d --name idleagent -p 8000:8000 \
 ## 目录结构
 
 ```
-IdleAgent/ v0.6.0
+IdleAgent/ v0.9.0
 ├── .env.example              # 环境变量模板（脱敏）
 ├── requirements.txt          # Python 依赖
 ├── Dockerfile                # 云端部署镜像（含 Playwright + Chromium）
@@ -257,7 +257,7 @@ IdleAgent/ v0.6.0
 
 | 游戏 | 状态 | 完成度 |
 |------|------|--------|
-| [Melvor Idle](https://melvoridle.com) | v0.6.0 可用 | 适配器完整，JS 注入 + DOM 解析双策略，守卫操作、状态读取、动作执行、三种运行模式已接入引擎 |
+| [Melvor Idle](https://melvoridle.com) | v0.9.0 可用 | 适配器完整，JS 注入 + DOM 解析双策略，守卫操作、状态读取、动作执行、三种运行模式已接入引擎 |
 | Clicker Heroes | 计划中 | 适配器模板待开发 |
 | NGU Idle | 计划中 | — |
 
