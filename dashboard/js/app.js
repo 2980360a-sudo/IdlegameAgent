@@ -57,6 +57,7 @@
         melvorStatus: function () { return API.request('GET', '/melvor/status'); },
         melvorEvents: function () { return API.request('GET', '/melvor/events'); },
         melvorDecisions: function () { return API.request('GET', '/melvor/decisions'); },
+        melvorGuides: function () { return API.request('GET', '/melvor/guides'); },
         melvorScript: function (p) { return API.request('POST', '/melvor/script', p); }
     };
 
@@ -414,6 +415,9 @@
             '    <div class="panel"><div class="panel-header"><span class="panel-title">③ 角色数据</span><span class="panel-hint" id="mv-mode-label"></span></div>' +
             '      <div class="panel-body" id="mv-data"><div class="empty">尚未连接角色</div></div>' +
             '    </div>' +
+            '    <div class="panel"><div class="panel-header"><span class="panel-title">⑤ 攻略知识库 · 动作目录（RAG 方针）</span></div>' +
+            '      <div class="panel-body" id="mv-guides"><div class="empty">加载中...</div></div>' +
+            '    </div>' +
             '    <div class="panel"><div class="panel-header"><span class="panel-title">④ 事件与决策日志</span></div>' +
             '      <div class="panel-body log-two-col">' +
             '        <div><h4 class="form-section-title">事件</h4><ul id="mv-events" class="log-list"></ul></div>' +
@@ -425,6 +429,7 @@
 
         loadMelvorModes();
         loadMelvorConfig();
+        loadMelvorGuides();
         bindMelvor();
         refreshMelvor();
         melvorPollTimer = setInterval(refreshMelvor, 5000);
@@ -482,6 +487,38 @@
             refreshMelvor();
         }).catch(function (err) {
             toast('自动恢复失败：' + err.message, true);
+        });
+    }
+
+    function loadMelvorGuides() {
+        API.melvorGuides().then(function (data) {
+            var guides = data.guides || [];
+            var catalog = data.catalog;
+            var html = '';
+            guides.forEach(function (g) {
+                html += '<div class="guide-item">' +
+                    '<div class="guide-item-title">📖 ' + escapeHtml(g.title) + '</div>' +
+                    '<div class="guide-item-meta">' + escapeHtml(g.file) + ' · ' + escapeHtml(g.chars) + ' 字' +
+                    (g.source ? ' · ' + escapeHtml(g.source) : '') + '</div></div>';
+            });
+            if (catalog) {
+                var skills = catalog.skills || [];
+                html += '<h4 class="form-section-title">动态动作目录（' + skills.length + ' 技能 · ' +
+                    catalog.areas + ' 区域 · ' + catalog.dungeons + ' 地牢 · ' +
+                    catalog.slayerAreas + ' 屠杀 · ' + catalog.buildings + ' 建筑）</h4>';
+                html += '<div class="catalog-chips">';
+                skills.forEach(function (s) {
+                    html += '<span class="catalog-chip">' + escapeHtml(s.name) + ' ' + (s.lv != null ? s.lv : '') +
+                        ' <small>' + s.actions + ' 动作</small></span>';
+                });
+                html += '</div>';
+            } else {
+                html += '<h4 class="form-section-title">动态动作目录</h4>' +
+                    '<div class="empty">尚未抓取（启动挂机后自动枚举）</div>';
+            }
+            $('#mv-guides').innerHTML = html;
+        }).catch(function () {
+            $('#mv-guides').innerHTML = '<div class="empty">加载失败</div>';
         });
     }
 

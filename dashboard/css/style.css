@@ -295,6 +295,14 @@ border-left:3px solid var(--border-color);font-size:13px}
 .log-content{color:var(--text-secondary);font-size:12px;line-height:1.5}
 .log-content strong{color:var(--text-primary)}
 .log-content small{color:var(--text-muted)}
+.guide-item{padding:8px 0;border-bottom:1px solid var(--border-color)}
+.guide-item:last-child{border-bottom:none}
+.guide-item-title{font-size:13px;font-weight:600;color:var(--text-primary)}
+.guide-item-meta{font-size:11px;color:var(--text-muted);margin-top:2px;word-break:break-all}
+.catalog-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.catalog-chip{font-size:12px;padding:4px 10px;border-radius:20px;background:var(--bg-tertiary);
+  border:1px solid var(--border-color);color:var(--text-secondary)}
+.catalog-chip small{color:var(--text-muted)}
 
 /* ============ 响应式 ============ */
 @media(max-width:900px){

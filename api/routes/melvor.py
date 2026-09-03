@@ -73,6 +73,35 @@ async def list_modes():
     }
 
 
+def _catalog_summary(catalog: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """把动作目录压缩为摘要（供仪表盘展示，不含全部动作列表）。"""
+    if not catalog:
+        return None
+    return {
+        'skills': [
+            {'key': s.get('key'), 'name': s.get('name'), 'lv': s.get('lv'),
+             'actions': len(s.get('acts') or [])}
+            for s in (catalog.get('skills') or [])
+        ],
+        'areas': len(catalog.get('areas') or []),
+        'dungeons': len(catalog.get('dungeons') or []),
+        'slayerAreas': len(catalog.get('slayerAreas') or []),
+        'buildings': len(catalog.get('buildings') or []),
+    }
+
+
+@router.get('/melvor/guides')
+async def melvor_guides(user: dict = Depends(get_current_user)):
+    """攻略知识库 + 动态动作目录摘要（供仪表盘展示 RAG 决策方针）。"""
+    from core.guide import list_guide_meta
+    session = _get_session(user['id'])
+    catalog = getattr(session, '_action_catalog', None)
+    return {
+        'guides': list_guide_meta(),
+        'catalog': _catalog_summary(catalog),
+    }
+
+
 @router.get('/melvor/config')
 async def get_config(user: dict = Depends(get_current_user)):
     return {'config': account_store.get_public(user['id']) or {}}

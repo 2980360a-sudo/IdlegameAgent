@@ -11,7 +11,7 @@ load_dotenv()
 from api.routes import status, rules, logs, control, auth, melvor
 from api.managers import manager
 
-app = FastAPI(title="IdleAgent API", version="0.7.1")
+app = FastAPI(title="IdleAgent API", version="0.8.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -32,7 +32,7 @@ app.include_router(control.router, prefix="/api")
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "version": "0.7.1", "timestamp": datetime.now().isoformat()}
+    return {"status": "ok", "version": "0.8.0", "timestamp": datetime.now().isoformat()}
 
 
 # 2. WebSocket 路由（必须在静态文件挂载之前）

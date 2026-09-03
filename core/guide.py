@@ -34,6 +34,31 @@ def load_guides() -> Dict[str, str]:
     return guides
 
 
+def list_guide_meta() -> List[Dict[str, str]]:
+    """返回攻略元信息列表（供仪表盘展示）：文件名、标题、来源、字数。"""
+    metas: List[Dict[str, str]] = []
+    for name, content in load_guides().items():
+        title, source = name, ''
+        lines = content.splitlines()
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith('# '):
+                title = stripped.lstrip('# ').strip()
+                break
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith('> 来源'):
+                source = stripped.lstrip('>').strip()
+                break
+        metas.append({
+            'file': name,
+            'title': title,
+            'source': source,
+            'chars': str(len(content)),
+        })
+    return metas
+
+
 def get_policy(state: Optional[GameState] = None, max_chars: int = 9000) -> str:
     """返回注入 LLM 的「方针」文本。
 
@@ -52,7 +77,9 @@ def get_policy(state: Optional[GameState] = None, max_chars: int = 9000) -> str:
             return 1
         if 'township' in name or '城镇' in name:
             return 2
-        return 3
+        if 'money' in name or '赚钱' in name:
+            return 3
+        return 4
 
     ordered = sorted(guides.items(), key=lambda kv: (_priority(kv[0]), kv[0]))
     parts = [f'### 攻略：{name}\n{content}' for name, content in ordered]
