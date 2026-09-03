@@ -8,10 +8,10 @@ from datetime import datetime
 # 加载 .env（uvicorn 直接启动时也生效），必须在路由导入之前
 load_dotenv()
 
-from api.routes import status, rules, logs, control, auth, melvor
+from api.routes import status, rules, logs, control, auth, melvor, settings
 from api.managers import manager
 
-app = FastAPI(title="IdleAgent API", version="0.8.2")
+app = FastAPI(title="IdleAgent API", version="0.9.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,6 +24,7 @@ app.add_middleware(
 # 1. REST 路由（必须注册在静态文件挂载之前）
 app.include_router(auth.router, prefix="/api")
 app.include_router(melvor.router, prefix="/api")
+app.include_router(settings.router, prefix="/api")
 app.include_router(status.router, prefix="/api")
 app.include_router(rules.router, prefix="/api")
 app.include_router(logs.router, prefix="/api")

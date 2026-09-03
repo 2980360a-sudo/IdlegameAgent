@@ -18,11 +18,18 @@ class LLMClient:
     """
 
     def __init__(self, api_key: str = None, base_url: str = None, model: str = None):
-        self.api_key = api_key or os.environ.get('LLM_API_KEY', '')
-        self.model = model or os.environ.get('LLM_MODEL', 'deepseek-chat')
+        # 优先显式参数，其次持久化设置，最后环境变量
+        cfg = {}
+        try:
+            from core.settings import get_settings_store
+            cfg = get_settings_store().get_llm_config()
+        except Exception:
+            cfg = {}
+        self.api_key = api_key or cfg.get('api_key') or os.environ.get('LLM_API_KEY', '')
+        self.model = model or cfg.get('model') or os.environ.get('LLM_MODEL', 'deepseek-chat')
         self.temperature = float(os.environ.get('LLM_TEMPERATURE', '0.3'))
         self.base_url = (
-            base_url or os.environ.get('LLM_BASE_URL', 'https://api.deepseek.com')
+            base_url or cfg.get('base_url') or os.environ.get('LLM_BASE_URL', 'https://api.deepseek.com')
         ).rstrip('/')
         # token 消耗统计（累计）
         self.usage = {
@@ -32,6 +39,15 @@ class LLMClient:
             'total_tokens': 0,
             'cached_tokens': 0,
         }
+
+    def update_config(self, api_key: str = None, model: str = None, base_url: str = None):
+        """运行时更新配置（供设置页保存后热更新当前会话）。"""
+        if api_key is not None:
+            self.api_key = api_key
+        if model is not None:
+            self.model = model
+        if base_url is not None:
+            self.base_url = base_url.rstrip('/')
 
     @property
     def configured(self) -> bool:

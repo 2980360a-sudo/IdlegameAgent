@@ -349,10 +349,16 @@ border-left:3px solid var(--border-color);font-size:13px}
 .kv-progress .progress{flex-basis:100%;width:100%;margin-top:2px}
 .bank-progress{margin-top:12px}
 .bank-progress-label{font-size:12px;color:var(--text-secondary)}
+.dashboard-row{display:grid;grid-template-columns:2fr 1fr;gap:16px;align-items:start}
+.logs-filter{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+.filter-chip{padding:6px 14px;border-radius:20px;font-size:12px;font-weight:500;background:var(--bg-tertiary);color:var(--text-secondary);cursor:pointer;border:1px solid transparent;transition:var(--transition)}
+.filter-chip:hover{border-color:var(--border-color)}
+.filter-chip.active{background:rgba(0,212,170,.1);color:var(--accent-primary);border-color:var(--accent-primary)}
 
 /* ============ 响应式 ============ */
 @media(max-width:900px){
 .dashboard-stats{grid-template-columns:repeat(2,1fr)}
+.dashboard-row{grid-template-columns:1fr}
 .profile-grid{grid-template-columns:1fr}
 .melvor-grid{grid-template-columns:1fr}
 .mv-stat-grid{grid-template-columns:repeat(2,1fr)}

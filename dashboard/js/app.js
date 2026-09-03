@@ -61,7 +61,9 @@
         melvorEvents: function () { return API.request('GET', '/melvor/events'); },
         melvorDecisions: function () { return API.request('GET', '/melvor/decisions'); },
         melvorGuides: function () { return API.request('GET', '/melvor/guides'); },
-        melvorScript: function (p) { return API.request('POST', '/melvor/script', p); }
+        melvorScript: function (p) { return API.request('POST', '/melvor/script', p); },
+        getSettings: function () { return API.request('GET', '/settings'); },
+        updateSettings: function (p) { return API.request('POST', '/settings', p); }
     };
 
     // ============================================================
@@ -218,12 +220,16 @@
         var titles = {
             dashboard: ['仪表盘', '实时监控游戏 Agent 运行状态'],
             melvor: ['梅尔沃放置', '登录云账号、选择角色、运行挂机 Agent'],
+            logs: ['决策日志', '查看 Agent 的事件与决策记录'],
+            settings: ['系统设置', '模型 API 配置与运行参数'],
             profile: ['个人资料', '查看与编辑你的账户信息']
         };
         var t = titles[page] || titles.dashboard;
         $('#pageTitle').textContent = t[0];
         $('#pageSubtitle').textContent = t[1];
         if (page === 'melvor') renderMelvor();
+        else if (page === 'logs') renderLogs();
+        else if (page === 'settings') renderSettings();
         else if (page === 'profile') renderProfile();
         else renderDashboard();
     }
@@ -233,51 +239,178 @@
     // ============================================================
     function renderDashboard() {
         $('#contentArea').innerHTML = '' +
-            '<div class="dashboard-stats">' +
-            '  <div class="stat-card"><div class="stat-label">💰 金币</div><div class="stat-value" id="v-gold">-</div></div>' +
-            '  <div class="stat-card"><div class="stat-label">🪵 木头</div><div class="stat-value" id="v-wood">-</div></div>' +
-            '  <div class="stat-card"><div class="stat-label">🪨 石头</div><div class="stat-value" id="v-stone">-</div></div>' +
-            '  <div class="stat-card"><div class="stat-label">❤️ 生命值</div><div class="stat-value" id="v-hp">-</div></div>' +
-            '  <div class="stat-card"><div class="stat-label">❤️ 最大生命</div><div class="stat-value" id="v-maxhp">-</div></div>' +
+            '<div class="dashboard-stats" id="dash-stats">' +
+            '  <div class="stat-card"><div class="stat-label">金币</div><div class="stat-value" id="d-gold">-</div></div>' +
+            '  <div class="stat-card"><div class="stat-label">屠杀币</div><div class="stat-value" id="d-slayer">-</div></div>' +
+            '  <div class="stat-card"><div class="stat-label">总等级</div><div class="stat-value primary" id="d-total">-</div></div>' +
+            '  <div class="stat-card"><div class="stat-label">战斗等级</div><div class="stat-value primary" id="d-combat">-</div></div>' +
+            '  <div class="stat-card"><div class="stat-label">仓库</div><div class="stat-value" id="d-bank">-</div></div>' +
+            '  <div class="stat-card"><div class="stat-label">生命</div><div class="stat-value success" id="d-hp">-</div></div>' +
             '</div>' +
-            '<div class="panel">' +
-            '  <div class="panel-header"><span class="panel-title">决策日志</span>' +
-            '    <span class="panel-hint" id="statusHint"></span></div>' +
-            '  <div class="panel-body">' +
-            '    <table class="logs-table">' +
-            '      <thead><tr><th>时间</th><th>级别</th><th>模块</th><th>消息</th></tr></thead>' +
-            '      <tbody id="logBody"></tbody>' +
-            '    </table>' +
-            '  </div>' +
+            '<div class="dashboard-row">' +
+            '  <div class="panel"><div class="panel-header"><span class="panel-title">Agent 运行状态</span></div>' +
+            '    <div class="panel-body" id="dash-agent"><div class="empty">加载中...</div></div></div>' +
+            '  <div class="panel"><div class="panel-header"><span class="panel-title">最近决策</span></div>' +
+            '    <div class="panel-body"><ul id="dash-decisions" class="log-list"></ul></div></div>' +
             '</div>';
         loadDashboardData();
     }
 
     function loadDashboardData() {
-        API.getStatus().then(function (status) {
-            var r = status.resources || {};
-            $('#v-gold').textContent = fmt(r.gold);
-            $('#v-wood').textContent = fmt(r.wood);
-            $('#v-stone').textContent = fmt(r.stone);
-            var c = status.combat || {};
-            $('#v-hp').textContent = fmt(c.hp);
-            $('#v-maxhp').textContent = fmt(c.max_hp);
-            $('#statusHint').textContent = (status.is_running ? '运行中' : '已停止') +
-                (status.source ? ' · ' + (status.source === 'real' ? '真实数据' : '模拟数据') : '');
+        API.melvorStatus().then(function (s) {
+            var game = s.game || {};
+            var raw = game.raw_probe || {};
+            $('#d-gold').textContent = fmtCompact(game.gold);
+            $('#d-slayer').textContent = fmtCompact(game.slayer_coins);
+            $('#d-total').textContent = raw.totalLevel != null ? raw.totalLevel : '-';
+            $('#d-combat').textContent = game.combat_level != null ? game.combat_level : '-';
+            $('#d-bank').textContent = fmt(game.bank_used) + ' / ' + fmt(game.bank_max);
+            var hp = game.hp || 0, maxHp = game.max_hp || 0;
+            $('#d-hp').textContent = hp + ' / ' + maxHp;
+            // Agent 状态
+            var llm = s.llm || {};
+            $('#dash-agent').innerHTML = '<ul class="kv-list">' +
+                kvRow('会话状态', sessionText(s.session_state)) +
+                kvRow('运行模式', s.mode_label || '未启动') +
+                kvRow('角色', s.character_label || '未选择') +
+                kvRow('巡检间隔', (s.patrol_interval || 0) + ' 秒' + (s.llm_schedules ? ' · LLM 自主排程' : '')) +
+                kvRow('LLM', llm.configured ? (llm.model + ' · ' + fmtNum((llm.usage || {}).total_tokens) + ' tokens') : '未配置') +
+                '</ul>';
+        }).catch(function () {
+            $('#dash-agent').innerHTML = '<div class="empty"><div class="empty-icon">🎮</div>尚未连接角色，请到「梅尔沃放置」登录</div>';
+        });
+        API.melvorDecisions().then(function (d) {
+            renderMelvorLogs('#dash-decisions', (d.decisions || []).slice(0, 8), 'decision');
         }).catch(function () {});
-        API.getLogs(100).then(function (data) {
-            var logs = data.logs || [];
-            var html = '';
-            for (var i = 0; i < logs.length; i++) {
-                var log = logs[i];
-                var time = new Date(log.timestamp * 1000).toLocaleTimeString();
-                var level = log.level || 'info';
-                html += '<tr><td>' + time + '</td><td><span class="log-level ' + level + '">' +
-                    level.toUpperCase() + '</span></td><td>' + escapeHtml(log.module || '') +
-                    '</td><td>' + escapeHtml(log.message || '') + '</td></tr>';
-            }
-            $('#logBody').innerHTML = html || '<tr><td colspan="4" class="empty">暂无日志</td></tr>';
-        }).catch(function () {});
+    }
+
+    // ============================================================
+    // 决策日志（独立页，带级别筛选）
+    // ============================================================
+    var logsFilter = 'all';
+
+    function renderLogs() {
+        $('#contentArea').innerHTML = '' +
+            '<div class="logs-filter" id="logs-filter">' +
+            '  <span class="filter-chip active" data-f="all">全部</span>' +
+            '  <span class="filter-chip" data-f="decision">决策</span>' +
+            '  <span class="filter-chip" data-f="action">动作</span>' +
+            '  <span class="filter-chip" data-f="warning">警告</span>' +
+            '  <span class="filter-chip" data-f="error">错误</span>' +
+            '  <span class="filter-chip" data-f="info">信息</span>' +
+            '</div>' +
+            '<div class="panel"><div class="panel-header"><span class="panel-title">日志时间线</span>' +
+            '  <span class="panel-hint" id="logs-hint"></span></div>' +
+            '  <div class="panel-body"><ul id="logs-list" class="log-list" style="max-height:none"></ul></div></div>';
+        $$('#logs-filter .filter-chip').forEach(function (c) {
+            c.addEventListener('click', function () {
+                $$('#logs-filter .filter-chip').forEach(function (x) { x.classList.remove('active'); });
+                c.classList.add('active');
+                logsFilter = c.dataset.f;
+                loadLogs();
+            });
+        });
+        loadLogs();
+    }
+
+    function loadLogs() {
+        API.melvorEvents().then(function (d) {
+            var events = (d.events || []).map(function (e) {
+                return { t: 'event', time: e.timestamp, level: e.severity || 'info', text: e.event_type, detail: e.details || {} };
+            });
+            return events;
+        }).then(function (events) {
+            return API.melvorDecisions().then(function (d) {
+                var decisions = (d.decisions || []).map(function (x) {
+                    var acts = (x.actions || []).map(function (a) { return a.action_type + '→' + a.target; }).join(', ');
+                    return { t: 'decision', time: x.timestamp, level: 'decision', text: x.reason || '决策', detail: acts };
+                });
+                return events.concat(decisions).sort(function (a, b) { return b.time - a.time; });
+            });
+        }).then(function (items) {
+            var filtered = items.filter(function (it) {
+                return logsFilter === 'all' || it.level === logsFilter;
+            });
+            $('#logs-hint').textContent = filtered.length + ' 条';
+            var html = filtered.map(function (it) {
+                var time = new Date(it.time * 1000).toLocaleString();
+                var detail = (it.detail && typeof it.detail === 'string') ? it.detail : JSON.stringify(it.detail || {});
+                return '<li class="log-item ' + it.level + '"><span class="log-time">' + time + ' · ' + it.level + '</span>' +
+                    '<div class="log-content"><strong>' + escapeHtml(it.text) + '</strong> ' + escapeHtml(detail) + '</div></li>';
+            }).join('');
+            $('#logs-list').innerHTML = html || '<li class="empty"><div class="empty-icon">📭</div>暂无日志</li>';
+        }).catch(function () {
+            $('#logs-list').innerHTML = '<li class="empty">加载失败</li>';
+        });
+    }
+
+    // ============================================================
+    // 系统设置（模型 API 配置）
+    // ============================================================
+    function renderSettings() {
+        $('#contentArea').innerHTML = '' +
+            '<div class="panel"><div class="panel-header"><span class="panel-title">模型 API 配置</span>' +
+            '  <span class="panel-hint">DeepSeek / OpenAI 兼容接口</span></div>' +
+            '  <div class="panel-body">' +
+            '    <div class="form-group"><label>API Key</label>' +
+            '      <input type="password" class="form-input" id="st-api-key" placeholder="sk-..." autocomplete="off"></div>' +
+            '    <div class="form-group"><label>模型</label>' +
+            '      <input type="text" class="form-input" id="st-model" placeholder="deepseek-chat"></div>' +
+            '    <div class="form-group"><label>接口地址（Base URL）</label>' +
+            '      <input type="text" class="form-input" id="st-base-url" placeholder="https://api.deepseek.com"></div>' +
+            '    <div class="btn-row"><button class="btn btn-primary" id="st-save-btn">保存配置</button>' +
+            '      <button class="btn btn-ghost" id="st-test-btn">测试连接</button></div>' +
+            '    <div id="st-hint" class="panel-hint mt"></div>' +
+            '  </div>' +
+            '</div>' +
+            '<div class="panel"><div class="panel-header"><span class="panel-title">说明</span></div>' +
+            '  <div class="panel-body" style="font-size:13px;color:var(--text-secondary);line-height:1.8">' +
+            '    · API Key 保存后立即生效（当前会话热更新），无需重启后端。<br>' +
+            '    · 留空 API Key 并保存可清除已配置的密钥。<br>' +
+            '    · 配置优先级：本页设置 &gt; .env 环境变量。<br>' +
+            '    · 修改后请在「梅尔沃放置」页观察 token 消耗与决策是否正常。' +
+            '  </div>' +
+            '</div>';
+        loadSettings();
+        bindSettings();
+    }
+
+    function loadSettings() {
+        API.getSettings().then(function (data) {
+            var llm = data.llm || {};
+            $('#st-model').value = llm.model || '';
+            $('#st-base-url').value = llm.base_url || '';
+            $('#st-hint').textContent = llm.has_key ? ('当前 Key：' + llm.api_key_masked) : '尚未配置 API Key';
+        }).catch(function (err) {
+            $('#st-hint').textContent = '加载失败：' + err.message;
+        });
+    }
+
+    function bindSettings() {
+        $('#st-save-btn').addEventListener('click', function () {
+            var btn = this; btn.disabled = true; btn.textContent = '保存中...';
+            API.updateSettings({
+                api_key: $('#st-api-key').value.trim(),
+                model: $('#st-model').value.trim(),
+                base_url: $('#st-base-url').value.trim()
+            }).then(function (data) {
+                $('#st-api-key').value = '';
+                toast('配置已保存' + (data.llm && data.llm.has_key ? '（Key 已生效）' : '（Key 已清除）'));
+                loadSettings();
+            }).catch(function (err) { toast(err.message, true); })
+              .finally(function () { btn.disabled = false; btn.textContent = '保存配置'; });
+        });
+
+        $('#st-test-btn').addEventListener('click', function () {
+            var key = $('#st-api-key').value.trim();
+            var model = $('#st-model').value.trim();
+            var base = $('#st-base-url').value.trim();
+            var btn = this; btn.disabled = true; btn.textContent = '测试中...';
+            API.updateSettings({ api_key: key || undefined, model: model || undefined, base_url: base || undefined })
+              .then(function () { toast('已保存，测试连接需通过实际决策触发（或重启后观察）'); })
+              .catch(function (err) { toast(err.message, true); })
+              .finally(function () { btn.disabled = false; btn.textContent = '测试连接'; });
+        });
     }
 
     function fmt(v) {
