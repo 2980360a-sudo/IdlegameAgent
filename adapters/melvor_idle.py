@@ -231,7 +231,7 @@ class MelvorIdleAdapter(GameAdapter):
                 out.currencies = g(() => {
                     const o = {};
                     for (const [id, c] of game.currencies.registeredObjects) {
-                        if (c && c.amount) o[id.replace(/^melvor[A-Za-z0-9]*:/, '')] = Math.floor(c.amount);
+                        if (c && c.amount) o[(c.name || id.replace(/^melvor[A-Za-z0-9]*:/, ''))] = Math.floor(c.amount);
                     }
                     return o;
                 }, {});
@@ -301,7 +301,7 @@ class MelvorIdleAdapter(GameAdapter):
                     }
                     return null;
                 });
-                out.activeAction = g(() => game.activeAction ? game.activeAction.constructor.name : null);
+                out.activeAction = g(() => game.activeAction ? (game.activeAction.name || game.activeAction.constructor.name) : null);
                 out.skills = {};
                 g(() => {
                     for (const [id, s] of game.skills.registeredObjects) {
@@ -319,7 +319,7 @@ class MelvorIdleAdapter(GameAdapter):
                     for (const [k, v] of game.potions.activePotions) {
                         o.push({
                             action: k && k.id ? k.id : String(k),
-                            item: v && v.item ? v.item.id : null,
+                            item: v && v.item ? (v.item.name || v.item.id) : null,
                             charges: v && v.charges !== undefined ? v.charges : null,
                         });
                     }
@@ -351,20 +351,26 @@ class MelvorIdleAdapter(GameAdapter):
                         const reg = (r && r.registeredObjects) ? r.registeredObjects : r;
                         if (reg && typeof reg.forEach === 'function') {
                             reg.forEach((v, k) => {
-                                const id = (k && k.id) ? k.id : String(k);
                                 const amt = (v && v.amount !== undefined) ? v.amount : v;
-                                if (typeof amt === 'number') o[id.replace(/^melvor[A-Za-z0-9]*:/, '')] = Math.floor(amt);
+                                if (typeof amt !== 'number') return;
+                                const rawId = (k && k.id) ? String(k.id) : String(k);
+                                const nm = (v && v.name) ? v.name : rawId;
+                                o[nm.replace(/^melvor[A-Za-z0-9]*:/, '')] = Math.floor(amt);
                             });
                         }
                         return o;
                     }, {}),
                 };
-                out.township.storageUsed = g(() => { let s = 0; for (const k in out.township.resources) { if (k !== 'GP') s += out.township.resources[k]; } return s; });
+                out.township.storageUsed = g(() => { let s = 0; for (const k in out.township.resources) { if (k !== '金币' && k !== 'GP') s += out.township.resources[k]; } return s; });
                 out.equipment = g(() => {
                     const res = [];
                     game.equipmentSlots.registeredObjects.forEach((slot, id) => {
                         const it = g(() => game.combat.player.equipment.getItemInSlot(id), null);
-                        if (it) res.push({ slot: id.replace(/^melvor[A-Za-z0-9]*:/, ''), item: (it.name || '').replace(/^melvor[A-Za-z0-9]*:/, '') });
+                        if (!it) return;
+                        const nm = it.name || '';
+                        // 跳过空装备槽占位（Empty_Equipment / 无翻译项）
+                        if (/Empty_Equipment/.test(String(it.id || '')) || /UNDEFINED TRANSLATION/.test(nm)) return;
+                        res.push({ slot: id.replace(/^melvor[A-Za-z0-9]*:/, ''), item: nm.replace(/^melvor[A-Za-z0-9]*:/, '') });
                     });
                     return res;
                 }, []);
