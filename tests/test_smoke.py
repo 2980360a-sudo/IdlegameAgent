@@ -221,6 +221,20 @@ async def main():
     filtered = s3._filter_death_risky(risky)
     check('生存模式拦截 combat 动作', all(a.action_type != 'combat' for a in filtered))
 
+    print('\n== 11. 定时巡检 + token 监控 ==')
+    from core.llm import LLMClient
+    from core.melvor_agent import MelvorAgentSession
+    lc = LLMClient(api_key='sk-test', base_url='https://api.deepseek.com', model='deepseek-chat')
+    check('LLMClient 已配置', lc.configured)
+    check('usage 结构含 token 统计', all(k in lc.usage for k in ('calls', 'prompt_tokens', 'completion_tokens', 'total_tokens')))
+    s4 = MelvorAgentSession(4, mock=True)
+    check('默认巡检间隔为数字', isinstance(s4.patrol_interval, float) and s4.patrol_interval >= 5)
+    check('设置巡检间隔生效', s4.set_patrol_interval(30) == 30.0)
+    check('巡检间隔下限 5 秒', s4.set_patrol_interval(1) == 5.0)
+    st = await s4.get_status()
+    check('status 含 patrol_interval', 'patrol_interval' in st)
+    check('status 含 llm 字段', 'llm' in st and 'usage' in st.get('llm', {}))
+
     print(f'\n===== 结果: {passed} 通过, {failed} 失败 =====')
     return 0 if failed == 0 else 1
 

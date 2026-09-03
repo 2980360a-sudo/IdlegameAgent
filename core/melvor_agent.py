@@ -169,6 +169,7 @@ class MelvorAgentSession:
         self._script: List[Dict[str, Any]] = []
         self._script_last_run: Dict[int, float] = {}
         self._action_catalog: Optional[Dict[str, Any]] = None
+        self.patrol_interval: float = float(os.environ.get('MELVOR_LOOP_INTERVAL', '10'))
 
         # mock 专用状态
         self._mock_state = self._make_mock_state()
@@ -319,6 +320,15 @@ class MelvorAgentSession:
         self.session_state = 'idle'
 
     # ---------- 状态读取 ----------
+    def set_patrol_interval(self, seconds: float) -> float:
+        """设置巡检间隔（状态抓取 → LLM 决策 的周期秒数），下限 5 秒。"""
+        try:
+            seconds = float(seconds)
+        except (TypeError, ValueError):
+            seconds = self.patrol_interval
+        self.patrol_interval = max(5.0, seconds)
+        return self.patrol_interval
+
     async def get_status(self) -> Dict[str, Any]:
         state = await self._read_state()
         return {
@@ -329,6 +339,12 @@ class MelvorAgentSession:
             'character_label': self.character_label,
             'game': state.model_dump() if state else None,
             'script': self._script,
+            'patrol_interval': self.patrol_interval,
+            'llm': {
+                'configured': bool(self.llm and self.llm.configured),
+                'model': self.llm.model if self.llm else '',
+                'usage': self.llm.usage if self.llm else None,
+            },
         }
 
     async def _read_state(self) -> Optional[GameState]:
@@ -352,8 +368,8 @@ class MelvorAgentSession:
 
     # ---------- 主循环 ----------
     async def _loop(self):
-        interval = float(os.environ.get('MELVOR_LOOP_INTERVAL', '10'))
         while self.session_state == 'running':
+            interval = self.patrol_interval
             try:
                 state = await self._read_state()
                 if state is not None:
@@ -510,7 +526,8 @@ class MelvorAgentSession:
             '你是 Melvor Idle 挂机决策助手。你的职责是：\n'
             '1) 阅读【攻略方针】（来自官方 Wiki 与社区成熟攻略）；\n'
             '2) 对照【当前账号状态】与【动作目录】，判断账号现在处于攻略的哪个阶段；\n'
-            '3) 从动作目录中挑出下一步最该做的具体动作，推进攻略进度。\n\n'
+            '3) 从动作目录中挑出下一步最该做的具体动作，推进攻略进度；\n'
+            '4) 对不熟悉的细分领域，优先依据【攻略方针】做判断、不要猜测；若方针未覆盖该领域，在 reason 中标注「需补充攻略」并做保守选择。\n\n'
             f'【运行模式】{mode_guide}\n\n'
             f'【攻略方针】\n{policy_block}\n\n'
             f'【当前账号状态】\n'

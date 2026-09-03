@@ -60,6 +60,10 @@ class ScriptRequest(BaseModel):
     script: List[Dict[str, Any]] = Field(..., description='manual 模式脚本（动作列表）')
 
 
+class PatrolRequest(BaseModel):
+    interval: float = Field(..., gt=0, description='巡检间隔秒数（状态抓取→LLM决策周期）')
+
+
 # ------------------------------------------------------------
 # 路由
 # ------------------------------------------------------------
@@ -194,6 +198,14 @@ async def start_agent(req: StartRequest, user: dict = Depends(get_current_user))
 async def stop_agent(user: dict = Depends(get_current_user)):
     session = _get_session(user['id'])
     return await session.stop()
+
+
+@router.post('/melvor/patrol')
+async def set_patrol_interval(req: PatrolRequest, user: dict = Depends(get_current_user)):
+    """设置定时巡检间隔（状态抓取 → LLM 决策 的周期秒数）。"""
+    session = _get_session(user['id'])
+    interval = session.set_patrol_interval(req.interval)
+    return {'ok': True, 'interval': interval}
 
 
 @router.post('/melvor/disconnect')

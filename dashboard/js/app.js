@@ -53,6 +53,7 @@
         melvorSelect: function (p) { return API.request('POST', '/melvor/select', p); },
         melvorStart: function (p) { return API.request('POST', '/melvor/start', p); },
         melvorStop: function () { return API.request('POST', '/melvor/stop'); },
+        melvorPatrol: function (p) { return API.request('POST', '/melvor/patrol', p); },
         melvorDisconnect: function () { return API.request('POST', '/melvor/disconnect'); },
         melvorStatus: function () { return API.request('GET', '/melvor/status'); },
         melvorEvents: function () { return API.request('GET', '/melvor/events'); },
@@ -410,15 +411,28 @@
             '        </div>' +
             '      </div>' +
             '    </div>' +
+            '    <div class="panel"><div class="panel-header"><span class="panel-title">③ 运行监控</span><span class="panel-hint">LLM token · 巡检间隔</span></div>' +
+            '      <div class="panel-body">' +
+            '        <div class="monitor-row"><span class="monitor-label">🔑 LLM</span><span class="monitor-value" id="mv-llm-state">-</span></div>' +
+            '        <div class="monitor-row"><span class="monitor-label">📊 调用次数</span><span class="monitor-value" id="mv-llm-calls">0</span></div>' +
+            '        <div class="monitor-row"><span class="monitor-label">📥 Prompt tokens</span><span class="monitor-value" id="mv-llm-prompt">0</span></div>' +
+            '        <div class="monitor-row"><span class="monitor-label">📤 Completion tokens</span><span class="monitor-value" id="mv-llm-completion">0</span></div>' +
+            '        <div class="monitor-row"><span class="monitor-label">Σ 总 tokens</span><span class="monitor-value" id="mv-llm-total">0</span></div>' +
+            '        <hr class="divider">' +
+            '        <div class="form-group"><label>巡检间隔（秒，状态抓取→LLM决策）</label>' +
+            '          <div class="patrol-row"><input type="number" id="mv-patrol-interval" class="form-input" min="5" step="1">' +
+            '          <button class="btn btn-ghost btn-sm" id="mv-patrol-btn">应用</button></div></div>' +
+            '      </div>' +
+            '    </div>' +
             '  </div>' +
             '  <div class="melvor-right">' +
-            '    <div class="panel"><div class="panel-header"><span class="panel-title">③ 角色数据</span><span class="panel-hint" id="mv-mode-label"></span></div>' +
+            '    <div class="panel"><div class="panel-header"><span class="panel-title">④ 角色数据</span><span class="panel-hint" id="mv-mode-label"></span></div>' +
             '      <div class="panel-body" id="mv-data"><div class="empty">尚未连接角色</div></div>' +
             '    </div>' +
             '    <div class="panel"><div class="panel-header"><span class="panel-title">⑤ 攻略知识库 · 动作目录（RAG 方针）</span></div>' +
             '      <div class="panel-body" id="mv-guides"><div class="empty">加载中...</div></div>' +
             '    </div>' +
-            '    <div class="panel"><div class="panel-header"><span class="panel-title">④ 事件与决策日志</span></div>' +
+            '    <div class="panel"><div class="panel-header"><span class="panel-title">⑥ 事件与决策日志</span></div>' +
             '      <div class="panel-body log-two-col">' +
             '        <div><h4 class="form-section-title">事件</h4><ul id="mv-events" class="log-list"></ul></div>' +
             '        <div><h4 class="form-section-title">决策</h4><ul id="mv-decisions" class="log-list"></ul></div>' +
@@ -539,9 +553,31 @@
             var warn = $('#mv-running-warning');
             if (warn) warn.classList.toggle('hidden', s.session_state !== 'running');
             renderMelvorData(s.game);
+            renderMonitor(s);
         }).catch(function () {});
         API.melvorEvents().then(function (d) { renderMelvorLogs('#mv-events', d.events || [], 'event'); }).catch(function () {});
         API.melvorDecisions().then(function (d) { renderMelvorLogs('#mv-decisions', d.decisions || [], 'decision'); }).catch(function () {});
+    }
+
+    function renderMonitor(s) {
+        var llm = s.llm || {};
+        var u = llm.usage || {};
+        var stateEl = $('#mv-llm-state');
+        if (stateEl) stateEl.textContent = llm.configured ? ('已配置 · ' + (llm.model || '')) : '未配置';
+        if ($('#mv-llm-calls')) $('#mv-llm-calls').textContent = fmtNum(u.calls);
+        if ($('#mv-llm-prompt')) $('#mv-llm-prompt').textContent = fmtNum(u.prompt_tokens);
+        if ($('#mv-llm-completion')) $('#mv-llm-completion').textContent = fmtNum(u.completion_tokens);
+        if ($('#mv-llm-total')) $('#mv-llm-total').textContent = fmtNum(u.total_tokens);
+        var intEl = $('#mv-patrol-interval');
+        if (intEl && intEl !== document.activeElement) intEl.value = s.patrol_interval != null ? s.patrol_interval : '';
+    }
+
+    function fmtNum(v) {
+        var n = Number(v);
+        if (isNaN(n)) return '0';
+        if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+        if (n >= 1e4) return (n / 1e3).toFixed(1) + 'K';
+        return n.toFixed(0);
     }
 
     function sessionText(s) {
@@ -717,6 +753,14 @@
             try { script = JSON.parse($('#mv-script').value || '[]'); }
             catch (e) { toast('脚本 JSON 格式错误', true); return; }
             API.melvorScript({ script: script }).then(function () { toast('脚本已保存'); }).catch(function (err) { toast(err.message, true); });
+        });
+
+        $('#mv-patrol-btn').addEventListener('click', function () {
+            var v = parseFloat($('#mv-patrol-interval').value);
+            if (isNaN(v) || v < 5) { toast('巡检间隔需 ≥ 5 秒', true); return; }
+            API.melvorPatrol({ interval: v }).then(function (d) {
+                toast('巡检间隔已设为 ' + d.interval + ' 秒');
+            }).catch(function (err) { toast(err.message, true); });
         });
     }
 

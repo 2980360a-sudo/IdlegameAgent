@@ -303,6 +303,12 @@ border-left:3px solid var(--border-color);font-size:13px}
 .catalog-chip{font-size:12px;padding:4px 10px;border-radius:20px;background:var(--bg-tertiary);
   border:1px solid var(--border-color);color:var(--text-secondary)}
 .catalog-chip small{color:var(--text-muted)}
+.monitor-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border-color);font-size:13px}
+.monitor-row:last-child{border-bottom:none}
+.monitor-label{color:var(--text-muted)}
+.monitor-value{color:var(--text-primary);font-family:var(--font-mono)}
+.patrol-row{display:flex;gap:8px}
+.patrol-row input{flex:1}
 
 /* ============ 响应式 ============ */
 @media(max-width:900px){
