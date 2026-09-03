@@ -101,6 +101,37 @@ async def melvor_auto_login(user: dict = Depends(get_current_user)):
     return result
 
 
+@router.post('/melvor/auto_resume')
+async def melvor_auto_resume(user: dict = Depends(get_current_user)):
+    """一键恢复：用已存账号登录 → 选已存角色 → 启动已存模式（全自动挂机）。"""
+    saved = account_store.get(user['id'])
+    if not saved or not saved.get('account') or not saved.get('password'):
+        return {'ok': False, 'error': '未保存云账号'}
+    session = _get_session(user['id'])
+    out: Dict[str, Any] = {'ok': True}
+
+    # 1. 登录
+    r = await session.login(saved['account'], saved['password'])
+    if not r.get('ok'):
+        raise HTTPException(status_code=400, detail=r.get('error', '登录失败'))
+    out['login'] = True
+    out['characters'] = r.get('characters', [])
+
+    # 2. 选角色（若已保存）
+    if saved.get('character_index') is not None:
+        r = await session.select_character(saved['character_index'])
+        out['select'] = bool(r.get('ok'))
+
+    # 3. 启动（若已保存模式）
+    if saved.get('mode'):
+        script = saved.get('script') if saved.get('mode') == 'manual' else None
+        r = await session.start(saved['mode'], script)
+        out['start'] = bool(r.get('ok'))
+        out['mode'] = saved['mode']
+
+    return out
+
+
 @router.get('/melvor/characters')
 async def list_characters(user: dict = Depends(get_current_user)):
     session = _get_session(user['id'])

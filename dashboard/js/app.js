@@ -48,6 +48,7 @@
         melvorConfig: function () { return API.request('GET', '/melvor/config'); },
         melvorLogin: function (p) { return API.request('POST', '/melvor/login', p); },
         melvorAutoLogin: function () { return API.request('POST', '/melvor/auto_login'); },
+        melvorAutoResume: function () { return API.request('POST', '/melvor/auto_resume'); },
         melvorCharacters: function () { return API.request('GET', '/melvor/characters'); },
         melvorSelect: function (p) { return API.request('POST', '/melvor/select', p); },
         melvorStart: function (p) { return API.request('POST', '/melvor/start', p); },
@@ -460,23 +461,27 @@
             if (c.character_index != null) {
                 $('#mv-session').textContent = '已选角色 #' + c.character_index;
             }
-            // 已保存云账号密码 → 自动登录（本地版无需每次输入密码）
+            // 已保存云账号密码 → 自动登录并恢复挂机（全自动）
             if (c.has_password && c.account) {
-                autoLoginMelvor();
+                autoResume();
             }
         }).catch(function () {});
     }
 
-    function autoLoginMelvor() {
-        API.melvorAutoLogin().then(function (data) {
-            toast('已用保存的云账号自动登录');
+    function autoResume() {
+        API.melvorAutoResume().then(function (data) {
             var chars = data.characters || [];
             var sel = $('#mv-char-select');
             sel.innerHTML = chars.map(function (cc, i) { return '<option value="' + i + '">' + escapeHtml(cc.label || ('角色 ' + i)) + '</option>'; }).join('');
             $('#mv-characters').classList.remove('hidden');
+            var msgs = [];
+            if (data.login) msgs.push('已自动登录');
+            if (data.select) msgs.push('已选角色');
+            if (data.start) msgs.push('已启动挂机（' + (data.mode || '') + '）');
+            toast(msgs.length ? msgs.join(' → ') : '已自动登录（未保存角色/模式，请手动选择）');
             refreshMelvor();
         }).catch(function (err) {
-            toast('自动登录失败：' + err.message, true);
+            toast('自动恢复失败：' + err.message, true);
         });
     }
 

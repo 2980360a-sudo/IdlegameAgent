@@ -33,6 +33,17 @@ RUN_MODE_DESC = {
     RunMode.MANUAL.value: '执行用户自己配置的脚本，LLM 不参与决策',
 }
 
+# 供 LLM 选择的命名操作（action_type=operation, target=操作名）
+AVAILABLE_OPERATIONS = [
+    ('resume_astrology', '恢复星象研究（激活星尘药水 III + 研究海密尔）'),
+    ('township_repair', '城镇维护（维修全部 + 健康恢复至100% + 仓储扩建）'),
+    ('farming_plant_harvest', '农务收获 + 种植三类作物（胡萝卜/草药/苹果树）'),
+    ('bank_buy_slots', '买仓库格（空闲<15触发，x1 安全）'),
+    ('brew_stardust', '制作星尘药水'),
+    ('force_save', '强制保存存档'),
+    ('wait', '等待 / 维持现状（不做任何操作）'),
+]
+
 
 # ------------------------------------------------------------
 # Melvor 账号存储（每用户一套 Melvor 云账号/角色/模式配置）
@@ -427,24 +438,48 @@ class MelvorAgentSession:
             return []
 
     def _build_llm_prompt(self, state: GameState, mode: str) -> str:
+        raw = state.raw_probe or {}
+        combat = raw.get('combat') or {}
+        township = raw.get('township') or {}
+        farming = raw.get('farming') or {}
+        astrology = raw.get('astrology') or {}
+        currencies = raw.get('currencies') or {}
+        equipment = raw.get('equipment') or []
+        food = combat.get('food') or {}
+        slayer = combat.get('slayerTask') or {}
+
         skills = ', '.join(
-            f'{k}=Lv{v.level}' for k, v in list(state.skills.items())[:25]
+            f'{v.name or k}={v.level}' for k, v in list(state.skills.items())[:30]
         ) or '无'
-        hp = state.hp or 0
-        max_hp = state.max_hp or 1
+        equip_text = '、'.join(f'{e.get("item", "")}' for e in equipment[:10]) or '无'
+        currency_text = '、'.join(f'{k} {v}' for k, v in list(currencies.items())[:6]) or '无'
+
+        ops = '\n'.join(f'- {name}：{desc}' for name, desc in AVAILABLE_OPERATIONS)
         mode_guide = {
-            RunMode.EFFICIENCY.value: '追求最高效率/进度，忽略死亡风险，可以挑战高收益但危险的战斗',
-            RunMode.SURVIVAL.value: '追求效率但绝对不允许角色死亡，避免任何可能导致死亡的操作',
+            RunMode.EFFICIENCY.value: '追求最高效率/进度，忽略死亡风险，优先提升技能与推进度',
+            RunMode.SURVIVAL.value: '追求效率但 100% 不允许角色死亡，优先保证安全（HP/食物充足）',
         }.get(mode, '')
+
         return (
-            '请根据当前游戏状态给出下一步操作（只输出 JSON）。\n'
-            f'运行模式要求: {mode_guide}\n'
-            f'金币: {state.gold or 0}, 仓库: {state.bank_used or 0}/{state.bank_max or 0}\n'
-            f'HP: {hp}/{max_hp}, 战斗中: {"是" if state.combat_active else "否"}\n'
-            f'当前动作: {state.active_action or "无"}\n'
-            f'技能等级: {skills}\n'
-            '严格输出 JSON: {"actions": [{"action_type": "click|navigate|wait", '
-            '"target": "目标", "reason": "理由"}]}'
+            '你是 Melvor Idle 挂机决策助手。根据当前账号状态，从可用操作中选出下一步最合适的操作。\n'
+            f'【运行模式】{mode_guide}\n\n'
+            f'【账号状态】\n'
+            f'- 角色: {raw.get("characterName", "?")}，总等级 {raw.get("totalLevel", "?")}，战斗等级 {state.combat_level or "?"}\n'
+            f'- 货币: {currency_text}\n'
+            f'- 仓库: {state.bank_used}/{state.bank_max}（物品 {raw.get("bank", {}).get("itemCount", "?")}）\n'
+            f'- HP: {state.hp or 0}/{state.max_hp or 0}，战斗中: {"是" if state.combat_active else "否"}\n'
+            f'- 食物: {food.get("name", "无")}×{food.get("qty", 0)}\n'
+            f'- 屠杀任务: {slayer.get("monster", "无")}（剩 {slayer.get("killsLeft", 0)}）\n'
+            f'- 自动进食: Tier {combat.get("autoEatTier", "无")}\n'
+            f'- 当前动作: {state.active_action or "空闲"}\n'
+            f'- 装备: {equip_text}\n'
+            f'- 城镇: 等级 {township.get("level", "?")}，健康 {township.get("health", "?")}%，仓储 {township.get("storage", "?")}\n'
+            f'- 农务: 等级 {farming.get("level", "?")}，星象: 等级 {astrology.get("level", "?")}（研究 {astrology.get("studying", "无")}）\n'
+            f'- 技能: {skills}\n\n'
+            f'【可用操作】\n{ops}\n\n'
+            '请严格输出 JSON，action_type 固定为 operation：\n'
+            '{"actions": [{"action_type": "operation", "target": "操作名", "reason": "简短理由"}]}\n'
+            '每次只输出 1-3 个最合适的操作；若当前状态良好无需操作，输出 {"actions": []}。'
         )
 
     def _parse_actions(self, raw: str) -> List[Action]:
