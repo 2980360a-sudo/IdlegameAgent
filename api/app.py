@@ -33,7 +33,7 @@ app.include_router(control.router, prefix="/api")
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "version": "0.8.2", "timestamp": datetime.now().isoformat()}
+    return {"status": "ok", "version": "0.9.0", "timestamp": datetime.now().isoformat()}
 
 
 # 2. WebSocket 路由（必须在静态文件挂载之前）
