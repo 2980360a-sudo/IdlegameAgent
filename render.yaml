@@ -1,0 +1,24 @@
+# Render 部署蓝图（在 Render 控制台 New + Blueprint 选择本仓库即可）
+services:
+  - type: web
+    name: idleagent
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: HEADLESS
+        value: "true"
+      - key: BROWSER_PROFILE
+        value: /app/state/profile
+      - key: USE_REAL_ADAPTER
+        value: "true"
+      # 以下敏感项不写入蓝图，部署后在 Render 后台 Environment 手动填写：
+      - key: MELVOR_ACCOUNT
+        sync: false
+      - key: MELVOR_PASSWORD
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
+      # 自动生成一个持久密钥（用户登录 token 签名用）
+      - key: SECRET_KEY
+        generateValue: true

@@ -1,0 +1,15 @@
+# 构建镜像时排除以下内容
+.git
+.gitignore
+.env
+.env.example
+state/
+__pycache__/
+*.pyc
+*.pyo
+*.db
+*.sqlite3
+*.png
+tests/
+IdlegameAgent_repo/
+README.md

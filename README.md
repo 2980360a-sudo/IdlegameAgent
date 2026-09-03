@@ -137,12 +137,49 @@ python tests/test_smoke.py
 
 ---
 
+## 云端部署
+
+项目已提供 `Dockerfile`（含 Playwright + Chromium），可部署到任意支持 Docker 的平台。
+
+### Render（推荐，免费）
+
+1. 把代码推送到你的 GitHub 仓库
+2. 打开 [Render](https://render.com) → **New +** → **Blueprint**
+3. 选择本仓库，Render 会读取 `render.yaml` 自动创建服务
+4. 部署完成后，在服务的 **Environment** 里填写敏感变量：
+   - `MELVOR_ACCOUNT` / `MELVOR_PASSWORD`（你的 Melvor 云账号）
+   - `LLM_API_KEY`（可选，DeepSeek key）
+5. 访问 Render 分配的 `https://xxx.onrender.com` 即可打开控制台
+
+### 手动 Docker 部署
+
+```bash
+docker build -t idleagent .
+docker run -d --name idleagent -p 8000:8000 \
+  -e MELVOR_ACCOUNT=你的账号 \
+  -e MELVOR_PASSWORD=你的密码 \
+  -e SECRET_KEY=$(openssl rand -hex 32) \
+  -e USE_REAL_ADAPTER=true \
+  idleagent
+# 打开 http://localhost:8000
+```
+
+> ⚠️ **免费额度说明**：
+> - Render 免费版的磁盘是「临时盘」，重启/重新部署后 `state/`（用户库、浏览器 profile）会清空，需重新注册/登录。
+> - 如需持久化，给服务挂载 Render 持久磁盘（付费）即可。
+> - 挂机需要 Chromium，首次冷启动可能较慢；空闲会休眠（免费版），再次访问会自动唤醒。
+
+---
+
 ## 目录结构
 
 ```
 IdleAgent/ v0.6.0
 ├── .env.example              # 环境变量模板（脱敏）
 ├── requirements.txt          # Python 依赖
+├── Dockerfile                # 云端部署镜像（含 Playwright + Chromium）
+├── .dockerignore             # Docker 构建排除
+├── render.yaml               # Render 部署蓝图
 ├── .gitignore                # Git 忽略规则
 ├── LICENSE                   # MIT 许可证
 ├── README.md                 # 本文件
