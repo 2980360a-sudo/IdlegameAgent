@@ -196,8 +196,7 @@ async def main():
                   '{"action_type": "operation", "target": "force_save", "reason": "保存"}]}')
     fake_ad = FakeMelvorAdapter()
     s2 = MelvorAgentSession(2, adapter=fake_ad, llm=llm, mock=False)
-    s2._action_catalog = fake_ad  # 无动作目录占位（prompt 走「无动作目录」分支）
-    s2._page = object()  # 让 _execute 不因 page 为 None 提前返回
+    s2._page = object()  # 让 _llm_actions 走探测分支、_execute 不因 page 为 None 提前返回
     actions = await s2._llm_actions(make_low_hp_state(), 'efficiency')
     check('LLM 返回 2 个动作', len(actions) == 2)
     check('第 1 个是 skill 动作', actions[0].action_type == 'skill')
