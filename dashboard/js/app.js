@@ -419,9 +419,13 @@
             '        <div class="monitor-row"><span class="monitor-label">📤 Completion tokens</span><span class="monitor-value" id="mv-llm-completion">0</span></div>' +
             '        <div class="monitor-row"><span class="monitor-label">Σ 总 tokens</span><span class="monitor-value" id="mv-llm-total">0</span></div>' +
             '        <hr class="divider">' +
-            '        <div class="form-group"><label>巡检间隔（秒，状态抓取→LLM决策）</label>' +
-            '          <div class="patrol-row"><input type="number" id="mv-patrol-interval" class="form-input" min="5" step="1">' +
+            '        <div class="form-group"><label>巡检间隔（秒，默认 3600=1小时，上限 86400=24小时）</label>' +
+            '          <div class="patrol-row"><input type="number" id="mv-patrol-interval" class="form-input" min="5" max="86400" step="1">' +
             '          <button class="btn btn-ghost btn-sm" id="mv-patrol-btn">应用</button></div></div>' +
+            '        <div class="form-group">' +
+            '          <label class="checkbox-row"><input type="checkbox" id="mv-llm-schedules">' +
+            '          <span>让 LLM 自主决定下次检查时间（依据动作完成/资源变化估计）</span></label>' +
+            '        </div>' +
             '      </div>' +
             '    </div>' +
             '  </div>' +
@@ -570,6 +574,8 @@
         if ($('#mv-llm-total')) $('#mv-llm-total').textContent = fmtNum(u.total_tokens);
         var intEl = $('#mv-patrol-interval');
         if (intEl && intEl !== document.activeElement) intEl.value = s.patrol_interval != null ? s.patrol_interval : '';
+        var cb = $('#mv-llm-schedules');
+        if (cb) cb.checked = !!s.llm_schedules;
     }
 
     function fmtNum(v) {
@@ -760,6 +766,13 @@
             if (isNaN(v) || v < 5) { toast('巡检间隔需 ≥ 5 秒', true); return; }
             API.melvorPatrol({ interval: v }).then(function (d) {
                 toast('巡检间隔已设为 ' + d.interval + ' 秒');
+            }).catch(function (err) { toast(err.message, true); });
+        });
+
+        $('#mv-llm-schedules').addEventListener('change', function () {
+            var on = this.checked;
+            API.melvorPatrol({ llm_schedules: on }).then(function () {
+                toast(on ? '已开启：LLM 自主决定下次检查' : '已关闭：使用固定巡检间隔');
             }).catch(function (err) { toast(err.message, true); });
         });
     }

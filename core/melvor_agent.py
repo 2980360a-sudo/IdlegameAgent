@@ -34,6 +34,10 @@ RUN_MODE_DESC = {
     RunMode.MANUAL.value: '执行用户自己配置的脚本，LLM 不参与决策',
 }
 
+# 巡检间隔范围：下限 5 秒，上限 24 小时（游戏离线挂机累计上限，超过不再累计）
+PATROL_INTERVAL_MIN = 5.0
+PATROL_INTERVAL_MAX = 86400.0  # 24 小时
+
 # 供 LLM 选择的命名操作（action_type=operation, target=操作名）
 AVAILABLE_OPERATIONS = [
     ('resume_astrology', '恢复星象研究（激活星尘药水 III + 研究海密尔）'),
@@ -169,7 +173,9 @@ class MelvorAgentSession:
         self._script: List[Dict[str, Any]] = []
         self._script_last_run: Dict[int, float] = {}
         self._action_catalog: Optional[Dict[str, Any]] = None
-        self.patrol_interval: float = float(os.environ.get('MELVOR_LOOP_INTERVAL', '10'))
+        self.patrol_interval: float = float(os.environ.get('MELVOR_LOOP_INTERVAL', '3600'))
+        self.llm_schedules: bool = False  # 是否让 LLM 决定下次检查时间
+        self._next_interval: Optional[float] = None  # LLM 建议的下次检查间隔（秒）
 
         # mock 专用状态
         self._mock_state = self._make_mock_state()
@@ -321,13 +327,18 @@ class MelvorAgentSession:
 
     # ---------- 状态读取 ----------
     def set_patrol_interval(self, seconds: float) -> float:
-        """设置巡检间隔（状态抓取 → LLM 决策 的周期秒数），下限 5 秒。"""
+        """设置巡检间隔（状态抓取 → LLM 决策 的周期秒数），钳制到 [5s, 24h]。"""
         try:
             seconds = float(seconds)
         except (TypeError, ValueError):
             seconds = self.patrol_interval
-        self.patrol_interval = max(5.0, seconds)
+        self.patrol_interval = min(PATROL_INTERVAL_MAX, max(PATROL_INTERVAL_MIN, seconds))
         return self.patrol_interval
+
+    def set_llm_schedules(self, enabled: bool) -> bool:
+        """开关「LLM 自主决定下次检查时间」。"""
+        self.llm_schedules = bool(enabled)
+        return self.llm_schedules
 
     async def get_status(self) -> Dict[str, Any]:
         state = await self._read_state()
@@ -340,6 +351,7 @@ class MelvorAgentSession:
             'game': state.model_dump() if state else None,
             'script': self._script,
             'patrol_interval': self.patrol_interval,
+            'llm_schedules': self.llm_schedules,
             'llm': {
                 'configured': bool(self.llm and self.llm.configured),
                 'model': self.llm.model if self.llm else '',
@@ -386,10 +398,15 @@ class MelvorAgentSession:
                     )
                 self._log_decision(actions, self.mode or '', reason=self._last_reason)
                 self._last_reason = ''
+                # LLM 自主排程：若开启且本轮 LLM 给出了下次检查间隔，则覆盖默认间隔
+                if self.llm_schedules and self._next_interval is not None:
+                    interval = min(PATROL_INTERVAL_MAX, max(PATROL_INTERVAL_MIN, self._next_interval))
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 self._log_event('loop_error', 'error', {'error': str(e)})
+            finally:
+                self._next_interval = None
             await asyncio.sleep(interval)
 
     async def _execute(self, action: Action) -> bool:
@@ -551,10 +568,14 @@ class MelvorAgentSession:
             '- 战斗用 action_type="combat"，target 取 "area:区域名" / "dungeon:地牢名" / "slayer:屠杀区域名"（以【动作目录】为准）；\n'
             '- 城镇/农务/买仓库/保存等维护用 action_type="operation"，target 用【维护操作】里的名字；\n'
             '- 只输出当前应做的 1-3 个动作；若已满足攻略当前阶段目标，输出 {"actions": []}；\n'
+            + (
+                '- 额外输出 next_check_in 字段（秒）：建议下次上线检查的间隔。依据当前动作的完成时间估计'
+                '（如农务作物生长、技能训练到目标等级、药水耗尽、食物/仓库将满等），不超过 86400 秒（24 小时，游戏离线挂机上限）。\n'
+                if self.llm_schedules else ''
+            ) +
             '- 严格输出 JSON，动作可混用：\n'
-            '{"actions": [{"action_type": "skill", "target": "Woodcutting:NormalTree", "reason": "..."}, '
-            '{"action_type": "combat", "target": "area:农田", "reason": "..."}, '
-            '{"action_type": "operation", "target": "force_save", "reason": "..."}]}'
+            '{"actions": [{"action_type": "skill", "target": "Woodcutting:NormalTree", "reason": "..."}'
+            + (', "next_check_in": 1800' if self.llm_schedules else '') + ']}'
         )
 
     def _parse_actions(self, raw: str) -> List[Action]:
@@ -582,6 +603,15 @@ class MelvorAgentSession:
                 ))
             except Exception:
                 continue
+        # LLM 自主排程：解析 next_check_in（秒），钳制到 [5s, 24h]
+        nci = data.get('next_check_in')
+        if isinstance(nci, (int, float)):
+            try:
+                nci = float(nci)
+                if nci == nci:  # 非 NaN
+                    self._next_interval = min(PATROL_INTERVAL_MAX, max(PATROL_INTERVAL_MIN, nci))
+            except (TypeError, ValueError):
+                pass
         return actions
 
     # ---------- 生存保护 ----------

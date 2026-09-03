@@ -61,7 +61,8 @@ class ScriptRequest(BaseModel):
 
 
 class PatrolRequest(BaseModel):
-    interval: float = Field(..., gt=0, description='巡检间隔秒数（状态抓取→LLM决策周期）')
+    interval: Optional[float] = Field(None, gt=0, description='巡检间隔秒数（状态抓取→LLM决策周期）')
+    llm_schedules: Optional[bool] = Field(None, description='是否让 LLM 决定下次检查时间')
 
 
 # ------------------------------------------------------------
@@ -202,10 +203,14 @@ async def stop_agent(user: dict = Depends(get_current_user)):
 
 @router.post('/melvor/patrol')
 async def set_patrol_interval(req: PatrolRequest, user: dict = Depends(get_current_user)):
-    """设置定时巡检间隔（状态抓取 → LLM 决策 的周期秒数）。"""
+    """设置定时巡检间隔，或开关「LLM 自主决定下次检查时间」。"""
     session = _get_session(user['id'])
-    interval = session.set_patrol_interval(req.interval)
-    return {'ok': True, 'interval': interval}
+    out: Dict[str, Any] = {'ok': True}
+    if req.interval is not None:
+        out['interval'] = session.set_patrol_interval(req.interval)
+    if req.llm_schedules is not None:
+        out['llm_schedules'] = session.set_llm_schedules(req.llm_schedules)
+    return out
 
 
 @router.post('/melvor/disconnect')

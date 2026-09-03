@@ -228,11 +228,20 @@ async def main():
     check('LLMClient 已配置', lc.configured)
     check('usage 结构含 token 统计', all(k in lc.usage for k in ('calls', 'prompt_tokens', 'completion_tokens', 'total_tokens')))
     s4 = MelvorAgentSession(4, mock=True)
-    check('默认巡检间隔为数字', isinstance(s4.patrol_interval, float) and s4.patrol_interval >= 5)
+    check('默认巡检间隔为 3600（1小时）', s4.patrol_interval == 3600.0)
     check('设置巡检间隔生效', s4.set_patrol_interval(30) == 30.0)
     check('巡检间隔下限 5 秒', s4.set_patrol_interval(1) == 5.0)
+    check('巡检间隔上限 24 小时', s4.set_patrol_interval(100000) == 86400.0)
+    check('开关 LLM 自主排程', s4.set_llm_schedules(True) is True)
+    # LLM 排程：解析 next_check_in
+    s4._next_interval = None
+    s4._parse_actions('{"actions": [{"action_type":"wait","target":"body"}], "next_check_in": 1800}')
+    check('解析 next_check_in', s4._next_interval == 1800.0)
+    s4._parse_actions('{"actions": [], "next_check_in": 999999}')
+    check('next_check_in 钳制到 24h', s4._next_interval == 86400.0)
     st = await s4.get_status()
     check('status 含 patrol_interval', 'patrol_interval' in st)
+    check('status 含 llm_schedules', st.get('llm_schedules') is True)
     check('status 含 llm 字段', 'llm' in st and 'usage' in st.get('llm', {}))
 
     print(f'\n===== 结果: {passed} 通过, {failed} 失败 =====')
