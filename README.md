@@ -7,7 +7,7 @@
 
 一个基于 LLM 的通用挂机游戏（Idle/Incremental Games）自动化决策 Agent 框架。支持多游戏接入、可配置决策规则、可审计决策日志与持续策略学习。
 
-> 本项目源于对 [Melvor Idle](https://melvoridle.com) 的实战 Agent 开发，目标是抽象出一套可复用于任意挂机游戏的通用决策引擎。
+> 本项目源于对 [Melvor Idle](https://melvoridle.com) 的实战 Agent 开发，目标是抽象出一套可复用于任意持续复杂条件判断程序的通用决策引擎。
 
 ---
 
